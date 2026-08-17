@@ -2499,6 +2499,7 @@ describe("Codex catalog routed normalization", () => {
     expect(entry).not.toHaveProperty("default_service_tier");
     expect(entry.web_search_tool_type).toBe("text_and_image");
     expect(entry.supports_search_tool).toBe(true);
+    expect(entry.auto_review_model_override).toBe("codex-auto-review");
   });
 
   test("buildCatalogEntries strips routed entries cloned from native templates", () => {
@@ -2522,6 +2523,7 @@ describe("Codex catalog routed normalization", () => {
     expect(routed?.web_search_tool_type).toBe("text_and_image");
     expect(routed?.supports_search_tool).toBe(true);
     expect(routed?.supports_reasoning_summaries).toBe(false);
+    expect(routed?.auto_review_model_override).toBe("codex-auto-review");
     expect(routed?.base_instructions).not.toBe(nativeTemplate().base_instructions);
     expect(routed?.base_instructions).toContain("claude-sonnet-4-6");
     expect(routed?.default_reasoning_level).toBe("medium");

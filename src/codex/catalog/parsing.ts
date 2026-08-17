@@ -526,6 +526,11 @@ export function normalizeRoutedCatalogEntry(entry: RawEntry, parallelToolCalls =
   // openai-chat adapter stops forcing parallel_tool_calls:false and the buffered stream parser
   // assembles multi-call turns (devlog/_plan/260709_parallel_tool_calls).
   entry.supports_parallel_tool_calls = isCursorEntry || parallelToolCalls === true;
+  // Keep Approve for me on Codex's dedicated reviewer even when the primary model is routed
+  // through Anthropic, xAI, or another provider. Without this override codex-rs can fall back to
+  // the selected routed model when resolving its reviewer, sending that provider the full approval
+  // transcript and producing provider-specific or effectively empty review decisions.
+  entry.auto_review_model_override = "codex-auto-review";
   return ensureStrictCatalogFields(entry, { isRouted: true });
 }
 
