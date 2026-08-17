@@ -160,7 +160,7 @@ Kiro 로그인에는 Kiro CLI가 필요합니다. Unix에서는 `curl -fsSL http
 
 ## 3. API 키 카탈로그
 
-opencodex에는 빌트인 프리셋이 79개 들어 있습니다. 키 방식 67개, OAuth 8개, 로컬 3개,
+opencodex에는 빌트인 프리셋이 80개 들어 있습니다. 키 방식 68개, OAuth 8개, 로컬 3개,
 기본 ChatGPT 포워드 프리셋 1개입니다. 대시보드의 **Add provider** 선택기는 키 발급 페이지를 열고,
 입력한 키를 검증한 뒤 저장합니다(검증은 프로바이더별로 다릅니다). 주요 항목은 다음과 같습니다:
 
@@ -185,6 +185,7 @@ Cline IDE/CLI에서만 제공되며 API로는 사용할 수 없습니다. `minim
 | **OpenRouter** | `https://openrouter.ai/api/v1` |
 | **Cline** | `https://api.cline.bot/api/v1` |
 | **ClinePass** | `https://api.cline.bot/api/v1` |
+| **TokenRouter** | `https://api.tokenrouter.com/v1` |
 | **Ollama Cloud** | `https://ollama.com/v1` |
 | Google Gemini · Google Vertex AI | `https://generativelanguage.googleapis.com` · `https://aiplatform.googleapis.com` |
 | Azure OpenAI | `https://{resource}.openai.azure.com/openai` |

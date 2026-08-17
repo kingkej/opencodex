@@ -660,6 +660,110 @@ describe("BUG-R86 routed web-search timeout semantics", () => {
     expect(frames.some(frame => frame.event === "response.completed")).toBe(true);
   });
 
+  test("Anthropic web-search path retries an empty turn with reasoning disabled", async () => {
+    const seenReasoning: Array<string | undefined> = [];
+    let parseCalls = 0;
+    let fetchCalls = 0;
+    const adapter: ProviderAdapter = {
+      name: "anthropic",
+      buildRequest(parsed) {
+        seenReasoning.push(parsed.options.reasoning);
+        return { url: "https://anthropic.test/v1/messages", method: "POST", headers: {}, body: "{}" };
+      },
+      fetchResponse: async () => {
+        fetchCalls++;
+        return new Response("wire", { status: 200 });
+      },
+      async *parseStream(response) {
+        await response.text();
+        parseCalls++;
+        if (parseCalls === 1) {
+          yield { type: "done", stopReason: "end_turn", usage: { inputTokens: 40, outputTokens: 2 } };
+          return;
+        }
+        yield { type: "text_delta", text: "FABLE_FIXED_OK" };
+        yield { type: "done", stopReason: "end_turn", usage: { inputTokens: 40, outputTokens: 5 } };
+      },
+      async parseResponse() { throw new Error("parseResponse must be unreachable"); },
+    };
+
+    const response = await runWithWebSearch({
+      parsed: parseRequest({
+        model: "anthropic/claude-fable-5",
+        input: "reply exactly",
+        stream: true,
+        reasoning: { effort: "high" },
+        tools: [{ type: "web_search" }],
+      }),
+      adapter,
+      forwardProvider,
+      hostedTool: { type: "web_search" },
+      selectedForwardHeaders: new Headers({ authorization: "Bearer token" }),
+      settings: { model: "gpt-5.6-luna", reasoning: "low", timeoutMs: 30_000 },
+      maxSearches: 1,
+    });
+
+    const frames = await collectSse(response.body!);
+    const completed = frames.find(frame => frame.event === "response.completed")?.data.response as Record<string, unknown>;
+    expect(fetchCalls).toBe(2);
+    expect(parseCalls).toBe(2);
+    expect(seenReasoning).toEqual(["high", "none"]);
+    expect(JSON.stringify(completed.output)).toContain("FABLE_FIXED_OK");
+    expect(completed.usage).toMatchObject({ input_tokens: 80, output_tokens: 7, total_tokens: 87 });
+  });
+
+  test("Anthropic empty retry usage survives a recovered web-search iteration", async () => {
+    globalThis.fetch = (() => Promise.resolve(new Response(
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"search result"}\n\n'
+      + 'event: response.completed\ndata: {"type":"response.completed"}\n\n',
+      { headers: { "Content-Type": "text/event-stream" } },
+    ))) as typeof fetch;
+
+    let parseCalls = 0;
+    const adapter: ProviderAdapter = {
+      name: "anthropic",
+      buildRequest: () => ({ url: "https://anthropic.test/v1/messages", method: "POST", headers: {}, body: "{}" }),
+      fetchResponse: async () => new Response("wire", { status: 200 }),
+      async *parseStream(response) {
+        await response.text();
+        parseCalls++;
+        if (parseCalls === 1) {
+          yield { type: "done", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 1 } };
+        } else if (parseCalls === 2) {
+          yield { type: "tool_call_start", id: "search_1", name: "web_search" };
+          yield { type: "tool_call_delta", arguments: '{"query":"docs"}' };
+          yield { type: "tool_call_end" };
+          yield { type: "done", stopReason: "tool_use", usage: { inputTokens: 10, outputTokens: 3 } };
+        } else {
+          yield { type: "text_delta", text: "final answer" };
+          yield { type: "done", stopReason: "end_turn", usage: { inputTokens: 12, outputTokens: 5 } };
+        }
+      },
+      async parseResponse() { throw new Error("parseResponse must be unreachable"); },
+    };
+
+    const response = await runWithWebSearch({
+      parsed: parseRequest({
+        model: "anthropic/claude-fable-5",
+        input: "search docs",
+        stream: true,
+        reasoning: { effort: "high" },
+        tools: [{ type: "web_search" }],
+      }),
+      adapter,
+      forwardProvider,
+      hostedTool: { type: "web_search" },
+      selectedForwardHeaders: new Headers({ authorization: "Bearer token" }),
+      settings: { model: "gpt-5.6-luna", reasoning: "low", timeoutMs: 30_000 },
+      maxSearches: 1,
+    });
+
+    const frames = await collectSse(response.body!);
+    const completed = frames.find(frame => frame.event === "response.completed")?.data.response as Record<string, unknown>;
+    expect(parseCalls).toBe(3);
+    expect(completed.usage).toMatchObject({ input_tokens: 32, output_tokens: 9, total_tokens: 41 });
+  });
+
   test("fast headers plus raw byte progress can outlive connectTimeoutMs", async () => {
     const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
     let bodyCancelled = 0;

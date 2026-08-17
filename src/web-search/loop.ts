@@ -23,6 +23,7 @@ import {
 import { formatWebSearchResults } from "./format-result";
 import { parseStreamWithProgress, RoutedModelInactivityError, WebSearchStreamProtocolError } from "./progress-stream";
 import { WEB_SEARCH_TOOL_NAME } from "./synthetic-tool";
+import { anthropicEmptyRetryRequest, mergeAnthropicRetryUsage, retryEmptyAnthropicBatch } from "../adapters/anthropic-empty-retry";
 
 const SSE_HEADERS = {
   "Content-Type": "text/event-stream",
@@ -342,6 +343,7 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
   const toolsNoWebSearch = allTools.filter(t => !t.webSearch);
   let searchesExecuted = 0;
   let executedSearchCount = 0;
+  let accumulatedModelUsage: OcxUsage | undefined;
   // Queries whose search already failed this turn — repeats are short-circuited so a model that keeps
   // re-asking the same failing query doesn't burn the whole search budget on it.
   const failedQueries = new Set<string>();
@@ -375,6 +377,9 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
     streamedPassthroughCount: number;
   };
 
+  /** Raw collected events for one iteration, before web-search scanning or empty-turn recovery. */
+  type CollectedIteration = { events: AdapterEvent[]; streamedPassthroughCount: number };
+
   // Same-target 429 budget is per REQUEST, not per model iteration: later search rounds inherit
   // what earlier rounds left of `attempts`, so a bounded multi-round turn can never exceed the
   // configured replay count in total (a per-round reset would multiply it by maxSearches).
@@ -388,8 +393,10 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
    * Fetch one web-search iteration's final response headers, applying the response-header
    * deadline and the same-target 429 retry policy (with awaited body release and deadline
    * restart) before the `on429` key rotation.
+   *
+   * `disableThinking` reruns the iteration through the anthropic empty-response retry shape.
    */
-  const prepareIterationEvents = async function* (forceAnswer: boolean): AsyncGenerator<AdapterEvent, IterationResponse> {
+  const prepareIterationEvents = async function* (forceAnswer: boolean, disableThinking = false): AsyncGenerator<AdapterEvent, IterationResponse> {
     // On the forced-answer pass the synthetic web_search tool is gone, so the model MUST answer
     // from the results already in `messages`. A weak model can still produce a thin answer that
     // ignores what the search found, which reads to the user as "the search did nothing". Nudge it
@@ -398,10 +405,11 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
     const iterMessages: OcxMessage[] = forceAnswer && executedSearchCount > 0
       ? [...messages, forcedAnswerNudge()]
       : messages;
-    const iterParsed: OcxParsedRequest = {
+    const baseIterParsed: OcxParsedRequest = {
       ...parsed, stream: true,
       context: { ...parsed.context, messages: iterMessages, tools: forceAnswer ? toolsNoWebSearch : allTools },
     };
+    const iterParsed = disableThinking ? anthropicEmptyRetryRequest(baseIterParsed) : baseIterParsed;
     // One cumulative header deadline spans every pool-key 429 rotation in this model iteration.
     // clear() stops only its timer after final headers; the direct turn signal remains attached to
     // the returned response body through AbortSignal.any().
@@ -561,8 +569,8 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
     }
   };
 
-  const prepareIterationDrained = async (forceAnswer: boolean): Promise<IterationResponse> => {
-    const it = prepareIterationEvents(forceAnswer);
+  const prepareIterationDrained = async (forceAnswer: boolean, disableThinking = false): Promise<IterationResponse> => {
+    const it = prepareIterationEvents(forceAnswer, disableThinking);
     let r = await it.next();
     while (!r.done) r = await it.next();
     return r.value;
@@ -581,7 +589,7 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
   // By default only invisible heartbeat events escape while semantic output remains buffered for
   // safe scanning; with `streamRoutedModelOutput` the leading text/thinking deltas stream live and
   // the live window closes permanently at the first buffer-only event (see LIVE_STREAMABLE).
-  const consumeIterationEvents = async function* (prepared: IterationResponse): AsyncGenerator<AdapterEvent, IterationSplit> {
+  const collectIterationEvents = async function* (prepared: IterationResponse): AsyncGenerator<AdapterEvent, CollectedIteration> {
     const events: AdapterEvent[] = [];
     let liveWindowOpen = deps.streamRoutedModelOutput === true;
     let streamedPassthroughCount = 0;
@@ -631,7 +639,31 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
       }
       throw new LoopError(502, terminal.message);
     }
-    return { ...scanEventsForWebSearch(events), streamedPassthroughCount };
+    return { events, streamedPassthroughCount };
+  };
+
+  const collectIterationDrained = async (prepared: IterationResponse): Promise<CollectedIteration> => {
+    const it = collectIterationEvents(prepared);
+    let result = await it.next();
+    while (!result.done) result = await it.next();
+    return result.value;
+  };
+
+  // Consume one iteration and apply the same bounded empty-turn recovery as the normal Responses
+  // path. Routed requests with Codex web_search enabled always pass through this loop, even when the
+  // model never calls search, so omitting the guard here recreates the silent Fable failure.
+  // The retry only fires when the first attempt produced no answer or action, and it keeps that
+  // attempt's leading events, so `streamedPassthroughCount` still indexes the live-streamed prefix.
+  const consumeIterationEvents = async function* (prepared: IterationResponse, forceAnswer: boolean): AsyncGenerator<AdapterEvent, IterationSplit> {
+    const collected = yield* collectIterationEvents(prepared);
+    let events = collected.events;
+    if (prepared.responseAdapter.name === "anthropic") {
+      events = await retryEmptyAnthropicBatch(events, async () => {
+        const retryPrepared = await prepareIterationDrained(forceAnswer, true);
+        return (await collectIterationDrained(retryPrepared)).events;
+      });
+    }
+    return { ...scanEventsForWebSearch(events), streamedPassthroughCount: collected.streamedPassthroughCount };
   };
 
   // Execute one model-requested web_search call. The call may batch several queries (native
@@ -813,7 +845,7 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
             prepared = yield* prepareIterationEvents(forceAnswer);
           }
           // Raw-byte progress heartbeats reach the bridge; semantic events remain buffered.
-          const split = yield* consumeIterationEvents(prepared);
+          const split = yield* consumeIterationEvents(prepared, forceAnswer);
 
           // Loop (search + re-ask) ONLY when the model's actionable output is purely web_search. A real
           // tool call (e.g. shell/apply_patch) means this turn is terminal for Codex — finalize so those
@@ -841,9 +873,19 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
               );
             }
             // Live-streamed leading events are exactly the first N passthrough entries — replay
-            // only the buffered tail so nothing reaches the client twice.
-            yield* replay(split.passthrough.slice(split.streamedPassthroughCount));
+            // only the buffered tail so nothing reaches the client twice. The terminal `done`
+            // carries every earlier iteration's usage (including empty-turn retries).
+            const finalEvents: AdapterEvent[] = split.passthrough
+              .slice(split.streamedPassthroughCount)
+              .map(event => event.type === "done"
+                ? { ...event, usage: mergeAnthropicRetryUsage(accumulatedModelUsage, event.usage) }
+                : event);
+            yield* replay(finalEvents);
             return;
+          }
+          const iterationDone = split.passthrough.findLast(event => event.type === "done");
+          if (iterationDone?.type === "done") {
+            accumulatedModelUsage = mergeAnthropicRetryUsage(accumulatedModelUsage, iterationDone.usage);
           }
           // The thinking that led to the search belongs to the FIRST call's assistant replay turn.
           const iterationThinking = extractIterationThinking(split.passthrough);

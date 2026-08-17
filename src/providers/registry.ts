@@ -1578,6 +1578,11 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
     models: ["openai/gpt-5.6-sol", "anthropic/claude-sonnet-5", "google/gemini-3.5-flash"],
     note: "Korean enterprise LLM gateway. Per-key allowed models are discovered live from /v1/models. Full catalog: https://bizrouter.ai/models",
   },
+  {
+    id: "tokenrouter", label: "TokenRouter", adapter: "openai-chat", baseUrl: "https://api.tokenrouter.com/v1", authKind: "key",
+    dashboardUrl: "https://www.tokenrouter.com/console/token", liveModels: true,
+    note: "Unified multi-provider gateway — models are discovered live from your TokenRouter account",
+  },
   { id: "groq", label: "Groq", adapter: "openai-chat", baseUrl: "https://api.groq.com/openai/v1", authKind: "key", featured: true, dashboardUrl: "https://console.groq.com/keys" },
   // 2026-07-10 Gemini API refresh: Tier-2 ai.google.dev evidence recorded in
   // devlog/_plan/260710_provider_hardening/001_research_frontier.md.

@@ -276,7 +276,7 @@ selectors, then retry. Signing in from a machine with no existing `kiro-cli` ses
 
 ## 3. API-key catalog
 
-opencodex ships 79 built-in presets: 67 key-based, eight OAuth, three local, and one default
+opencodex ships 80 built-in presets: 68 key-based, eight OAuth, three local, and one default
 ChatGPT-forward preset. The dashboard's **Add provider** picker opens a key provider's dashboard,
 validates the key, and stores it; validation is provider-specific. Notable entries:
 
@@ -301,6 +301,7 @@ free-experimentation model.
 | **OpenRouter** | `https://openrouter.ai/api/v1` |
 | **Cline** | `https://api.cline.bot/api/v1` |
 | **ClinePass** | `https://api.cline.bot/api/v1` |
+| **TokenRouter** | `https://api.tokenrouter.com/v1` |
 | **Ollama Cloud** | `https://ollama.com/v1` |
 | Google Gemini · Google Vertex AI | `https://generativelanguage.googleapis.com` · `https://aiplatform.googleapis.com` |
 | Azure OpenAI | `https://{resource}.openai.azure.com/openai` |

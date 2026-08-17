@@ -31,7 +31,7 @@ function nativeTemplate(): Record<string, unknown> {
 }
 
 const EXPECTED_KEY_PROVIDER_IDS = [
-  "anthropic-apikey", "openai-apikey", "umans", "opencode-go", "neuralwatt", "openrouter", "cline-pass", "cline", "orcarouter", "bizrouter", "groq", "google", "google-vertex", "azure-openai",
+  "anthropic-apikey", "openai-apikey", "umans", "opencode-go", "neuralwatt", "openrouter", "cline-pass", "cline", "orcarouter", "bizrouter", "tokenrouter", "groq", "google", "google-vertex", "azure-openai",
   "deepseek", "cerebras", "chutes", "deepinfra", "hyperbolic", "nscale", "vultr", "baseten", "commandcode", "sambanova", "nebius", "digitalocean", "scaleway", "featherless", "novita", "together", "fireworks", "firepass", "moonshot",
   "huggingface", "nvidia", "venice", "zai", "zhipu-bigmodel", "zhipu-bigmodel-coding", "nanogpt", "synthetic", "siliconflow", "qwen-cloud", "tencent-coding-plan",
   "volcengine", "volcengine-coding-plan", "volcengine-agent-plan", "qianfan", "alibaba", "alibaba-token-plan", "alibaba-token-plan-intl", "parallel", "zenmux", "litellm", "ollama-cloud", "mistral",
@@ -330,6 +330,20 @@ describe("provider registry parity", () => {
   });
 
   test("aggregator defaults and Neuralwatt seeds match the audited live catalogs", () => {
+    const tokenrouter = PROVIDER_REGISTRY.find(entry => entry.id === "tokenrouter");
+    expect(tokenrouter).toMatchObject({
+      adapter: "openai-chat",
+      baseUrl: "https://api.tokenrouter.com/v1",
+      authKind: "key",
+      dashboardUrl: "https://www.tokenrouter.com/console/token",
+      liveModels: true,
+    });
+    expect(KEY_LOGIN_PROVIDERS.tokenrouter).toMatchObject({
+      adapter: "openai-chat",
+      baseUrl: "https://api.tokenrouter.com/v1",
+      liveModels: true,
+    });
+
     const cerebras = PROVIDER_REGISTRY.find(entry => entry.id === "cerebras");
     expect(cerebras?.defaultModel).toBe("gpt-oss-120b");
 
