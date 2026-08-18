@@ -28,6 +28,11 @@ import { decodeRoutedModelIdOrThrow, encodeRoutedModelId } from "./providers/slu
 import { getStaleCached } from "./codex/model-cache";
 import { codexAccountNamespaceEntries } from "./codex/account-namespaces";
 import {
+  CODEX_AUTO_REVIEW_MODEL_ID,
+  nativeCodexReviewerUsable,
+  reviewerFallbackModelId,
+} from "./codex/reviewer-availability";
+import {
   buildRouteDecisionTrace,
   type RouteDecisionKind,
   type RouteDecisionTraceV1,
@@ -462,7 +467,7 @@ export function comboRouteDecisionTrace(
 
 // Codex uses a small number of control-plane model ids that are not part of the public GPT/o
 // naming families. Keep this exact: a broad `codex-*` rule could capture a third-party model.
-const CODEX_INTERNAL_OPENAI_MODELS = new Set(["codex-auto-review"]);
+const CODEX_INTERNAL_OPENAI_MODELS = new Set([CODEX_AUTO_REVIEW_MODEL_ID]);
 
 function isBareOpenAiFamilyModel(modelId: string): boolean {
   return !modelId.includes("/")
@@ -635,6 +640,26 @@ function routeModelInternal(
         "explicit-provider-namespace",
       );
     }
+  }
+
+  // Approvals must not die with the ChatGPT account. `codex-auto-review` is pinned to the
+  // canonical openai provider below, so an exhausted native quota 429'd EVERY approval — even in
+  // a session whose primary model was a healthy Anthropic/xAI route (observed 2026-08-17). The
+  // reviewer is exactly what has to keep answering during an outage, so when the native reviewer
+  // provably cannot answer it is re-pointed at a configured routed model.
+  //
+  // Deliberately here, at request time, rather than on the catalog's `auto_review_model_override`:
+  // the catalog is written to disk at sync time and read by codex-rs for the life of the file, so
+  // a build-time decision would freeze — dropping the override and never restoring it after the
+  // quota window resets, or pinning a dead reviewer until the next sync.
+  if (modelId === CODEX_AUTO_REVIEW_MODEL_ID && !nativeCodexReviewerUsable()) {
+    const fallback = reviewerFallbackModelId(config);
+    if (fallback) {
+      const route = routeModelInternal(config, fallback, true, undefined);
+      return { ...route, routeReason: "reviewer-fallback-native-unusable" };
+    }
+    // No eligible fallback: fall through to the native pin so the caller still gets the
+    // upstream's own 429 rather than a silently different error shape.
   }
 
   if (isBareOpenAiFamilyModel(modelId)) {

@@ -28,6 +28,7 @@ import {
 import type { NormalizedComboConfig } from "../../combos/types";
 import { providerDestinationResolvedError } from "../../lib/destination-policy";
 import { redactSecretString } from "../../lib/redact";
+import { CODEX_AUTO_REVIEW_MODEL_ID } from "../reviewer-availability";
 import upstreamModelsSnapshot from "../data/upstream-models.json";
 
 
@@ -530,7 +531,12 @@ export function normalizeRoutedCatalogEntry(entry: RawEntry, parallelToolCalls =
   // through Anthropic, xAI, or another provider. Without this override codex-rs can fall back to
   // the selected routed model when resolving its reviewer, sending that provider the full approval
   // transcript and producing provider-specific or effectively empty review decisions.
-  entry.auto_review_model_override = "codex-auto-review";
+  //
+  // The override stays unconditional. Availability is decided at REQUEST time in the router
+  // instead: this catalog is written to disk and read by codex-rs for the life of the file, so a
+  // build-time decision would freeze a stale answer until the next sync (dropped during a cooldown
+  // and never restored after the quota resets, or pinned to a reviewer that has since died).
+  entry.auto_review_model_override = CODEX_AUTO_REVIEW_MODEL_ID;
   return ensureStrictCatalogFields(entry, { isRouted: true });
 }
 

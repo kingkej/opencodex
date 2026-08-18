@@ -435,6 +435,38 @@ export function getAccountQuota(accountId: string): StoredAccountQuota | null {
   return accountQuota.get(accountId) ?? null;
 }
 
+/**
+ * The persisted bar for an account, WITHOUT the {@link QUOTA_DISK_MAX_AGE_MS} freshness gate.
+ *
+ * That gate is right for headroom: a six-hour-old "62% used" says little about capacity now, and
+ * a live path can refresh it. It is wrong for one narrow fact — an account reported at 100% with
+ * its reset still in the future cannot have regained capacity, because usage inside a window only
+ * climbs until the window turns over. Ageing that reading out replaces a known exhaustion with
+ * "unknown", which reads downstream as healthy.
+ *
+ * That matters because the refresher and the ageing are not on the same path. Quota is only
+ * written back from upstream headers for POOLED Codex auth (`usesCodexForwardPoolAuth`), so under
+ * Direct mode nothing refreshes this row at all and every snapshot ages out permanently.
+ *
+ * Callers must therefore check exhaustion AND an unexpired reset themselves; this returns the raw
+ * row precisely so a caller cannot silently treat a stale percentage as current headroom.
+ */
+export function readPersistedAccountQuota(accountId: string): StoredAccountQuota | null {
+  const live = getAccountQuota(accountId);
+  if (live) return live;
+  try {
+    const path = join(getConfigDir(), QUOTA_CACHE_FILENAME);
+    if (!existsSync(path)) return null;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as QuotaDiskFile;
+    if (!parsed || parsed.version !== 1 || !parsed.quotas || typeof parsed.quotas !== "object") return null;
+    const quota = parsed.quotas[accountId];
+    return quota && typeof quota === "object" && typeof quota.updatedAt === "number" ? quota : null;
+  } catch {
+    // Corrupt/missing cache must never block routing or the dashboard.
+    return null;
+  }
+}
+
 export function listAccountQuotas(): IterableIterator<[string, StoredAccountQuota]> {
   hydrateAccountQuotasFromDisk();
   return accountQuota.entries();
