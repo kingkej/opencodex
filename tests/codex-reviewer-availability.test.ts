@@ -131,6 +131,34 @@ describe("native Codex reviewer availability", () => {
     expect(reviewerFallbackModelId(disabled)).toBeNull();
   });
 
+  test("fallback refuses same-name custom destinations and non-independent auth", () => {
+    const customDestination = routableConfig();
+    customDestination.providers.anthropic!.baseUrl = "https://anthropic.enterprise.example";
+    expect(reviewerFallbackModelId(customDestination)).toBeNull();
+
+    const forwardAuth = routableConfig();
+    forwardAuth.providers.anthropic!.authMode = "forward";
+    expect(reviewerFallbackModelId(forwardAuth)).toBeNull();
+
+    const wrongAdapter = routableConfig();
+    wrongAdapter.providers.anthropic!.adapter = "openai-chat";
+    expect(reviewerFallbackModelId(wrongAdapter)).toBeNull();
+  });
+
+  test("fallback accepts canonical xAI OAuth when Anthropic is unavailable", () => {
+    const xai = routableConfig();
+    delete xai.providers.anthropic;
+    xai.providers.xai = {
+      adapter: "openai-chat",
+      baseUrl: "https://api.x.ai/v1/",
+      authMode: "oauth",
+      defaultModel: "grok-4.6",
+      models: ["grok-4.6"],
+    };
+
+    expect(reviewerFallbackModelId(xai)).toBe("xai/grok-4.6");
+  });
+
   test("the reviewer routes natively while the account is healthy", () => {
     const routable = routableConfig();
 
@@ -161,6 +189,17 @@ describe("native Codex reviewer availability", () => {
     const route = routeModel(openaiOnly, CODEX_AUTO_REVIEW_MODEL_ID);
 
     // Better a truthful upstream 429 than a silently different failure shape.
+    expect(route.providerName).toBe("openai");
+    expect(route.modelId).toBe(CODEX_AUTO_REVIEW_MODEL_ID);
+  });
+
+  test("an exhausted reviewer never sends approval context to a custom Anthropic endpoint", () => {
+    const customDestination = routableConfig();
+    customDestination.providers.anthropic!.baseUrl = "https://anthropic.enterprise.example";
+    recordCodexUpstreamOutcome(customDestination, MAIN_CODEX_ACCOUNT_ID, 429, { retryAfter: "600" });
+
+    const route = routeModel(customDestination, CODEX_AUTO_REVIEW_MODEL_ID);
+
     expect(route.providerName).toBe("openai");
     expect(route.modelId).toBe(CODEX_AUTO_REVIEW_MODEL_ID);
   });

@@ -26,6 +26,7 @@ import { readCodexTokensResult } from "./auth-collision";
 import { getMainAccountPlan, isMainAccountTokenLive } from "./main-account";
 import { isCodexQuotaExhausted, readPersistedAccountQuota } from "./quota";
 import { codexQuotaScopeForModel, getCodexQuotaHealthSnapshot } from "./routing";
+import { getProviderRegistryEntry } from "../providers/registry";
 import type { OcxConfig } from "../types";
 
 /** Native reviewer id. Kept here so the catalog and the availability check cannot drift apart. */
@@ -39,6 +40,42 @@ export const CODEX_AUTO_REVIEW_MODEL_ID = "codex-auto-review";
  */
 const REVIEWER_FALLBACK_PROVIDERS = ["anthropic", "xai"] as const;
 
+function normalizedReviewerEndpoint(value: string): string | null {
+  try {
+    const parsed = new URL(value.trim());
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reviewer traffic may contain approval context, so a familiar provider name is not enough.
+ * Require the configured row to retain the registry's canonical transport and an independently
+ * authenticated mode that the preset actually supports. In particular, Anthropic deliberately
+ * allows custom base URLs for enterprise gateways; those are valid ordinary routes but must not
+ * become an implicit reviewer destination during a native Codex outage.
+ */
+function isTrustedReviewerFallbackProvider(
+  name: (typeof REVIEWER_FALLBACK_PROVIDERS)[number],
+  provider: NonNullable<OcxConfig["providers"]>[string],
+): boolean {
+  const entry = getProviderRegistryEntry(name);
+  if (!entry || provider.adapter !== entry.adapter) return false;
+
+  const configuredEndpoint = normalizedReviewerEndpoint(provider.baseUrl);
+  const canonicalEndpoint = normalizedReviewerEndpoint(entry.baseUrl);
+  if (!configuredEndpoint || configuredEndpoint !== canonicalEndpoint) return false;
+
+  const authMode = provider.authMode ?? entry.authKind;
+  if (authMode === "oauth") return entry.authKind === "oauth";
+  if (authMode === "key") {
+    return entry.authKind === "key" || entry.allowKeyAuthOverride === true;
+  }
+  return false;
+}
+
 /**
  * A configured, enabled stand-in reviewer, or null when none qualifies.
  *
@@ -49,6 +86,7 @@ export function reviewerFallbackModelId(config: OcxConfig): string | null {
   for (const name of REVIEWER_FALLBACK_PROVIDERS) {
     const provider = config.providers?.[name];
     if (!provider || provider.disabled === true) continue;
+    if (!isTrustedReviewerFallbackProvider(name, provider)) continue;
     const model = provider.defaultModel;
     if (typeof model !== "string" || model.length === 0) continue;
     // Namespaced so the router resolves it through the explicit-provider path and cannot
