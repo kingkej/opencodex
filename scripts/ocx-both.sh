@@ -1,13 +1,14 @@
 #!/bin/zsh
 set -euo pipefail
 
-readonly actual_user_home="/Users/kej"
-readonly shared_opencodex_home="${actual_user_home}/.opencodex"
-readonly original_codex_home="${actual_user_home}/.codex"
-readonly shambotex_codex_home="${actual_user_home}/Library/Application Support/Parall/Shambotex/.codex"
-readonly develotexgpt_codex_home="${actual_user_home}/Library/Application Support/Parall/DevelotexGPT/.codex"
-readonly ocx_executable="${actual_user_home}/Documents/opencodex/bin/ocx.mjs"
-readonly stable_path="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${actual_user_home}/.local/bin"
+readonly script_dir="${0:A:h}"
+readonly actual_user_home="${OCX_ACTUAL_USER_HOME:-${HOME:?HOME must be set}}"
+readonly shared_opencodex_home="${OPENCODEX_HOME:-${actual_user_home}/.opencodex}"
+readonly original_codex_home="${OCX_PRIMARY_CODEX_HOME:-${actual_user_home}/.codex}"
+readonly shambotex_codex_home="${SHAMBOTEX_CODEX_HOME:-${actual_user_home}/Library/Application Support/Parall/Shambotex/.codex}"
+readonly develotexgpt_codex_home="${DEVELOTEXGPT_CODEX_HOME:-${actual_user_home}/Library/Application Support/Parall/DevelotexGPT/.codex}"
+readonly ocx_executable="${OCX_EXECUTABLE:-${script_dir}/../bin/ocx.mjs}"
+readonly stable_path="${OCX_STABLE_PATH:-/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${actual_user_home}/.local/bin}"
 
 run_for_original() {
   env \
