@@ -103,7 +103,7 @@ GUI-сессия в стиле loopback не выпускается.
 | --- | --- | --- |
 | `GET /api/config` | Вернуть redacted DTO конфигурации, безопасный для management API | — |
 | `PUT /api/config` | Отключённая защита от полной замены конфигурации | 405; используйте вместо этого узкие endpoint'ы |
-| `GET, PUT /api/settings` | Прочитать runtime/startup setting'и или обновить auto-start, stream mode, budget app-owned memory и `codexAccountPickerEnabled` | 400 invalid, non-object or empty update |
+| `GET, PUT /api/settings` | Прочитать runtime/startup setting'и или обновить auto-start, stream mode, budget app-owned memory, `codexAccountPickerEnabled` и `codexAccountPickerShowPoolModels` | 400 invalid, non-object or empty update |
 | `GET /api/startup-health` | Прочитать кэшированное startup health службы/shim'а | — |
 | `POST /api/startup-action` | Установить или починить службу или Codex shim | 400 invalid action; 500 action failure |
 | `GET, POST /api/windows-tray` | Прочитать состояние Windows tray или установить/запустить/остановить/удалить её | 400 unsupported platform/action; 500 operation failure |
@@ -219,7 +219,9 @@ Management-аутентификация доказывает доступ к п�
 
 ### Делегирование аутентификации Codex
 
-`GET /api/settings` возвращает эффективный boolean `codexAccountPickerEnabled`. `PUT` этого strict
+`GET /api/settings` возвращает эффективный boolean `codexAccountPickerEnabled` и сохранённую
+настройку `codexAccountPickerShowPoolModels`. Вторая не действует, пока picker выключен, но
+сохраняется для восстановления прежнего отображения при повторном включении. `PUT` любого strict
 boolean при включении пустой map создаёт privacy-safe selector'ы, сохраняет существующие labels,
 сначала записывает config и лишь затем один раз запускает bounded catalog convergence, если видимость
 picker изменилась. `catalogRefreshPending: true` в успешном ответе означает, что настройка сохранена,

@@ -554,6 +554,11 @@ export interface OcxConfig {
    * selector map remains visible for compatibility with hand-written configurations.
    */
   codexAccountPickerEnabled?: boolean;
+  /**
+   * Keep bare Pool/Direct native rows visible alongside account-qualified picker rows.
+   * Has no effect unless account-qualified rows are enabled; omitted preserves replacement mode.
+   */
+  codexAccountPickerShowPoolModels?: boolean;
   /** Active pool account id for next session. undefined = main (passthrough as-is). */
   activeCodexAccountId?: string;
   /** Auto-switch threshold (0-100). Default 80. 0 = disabled. */

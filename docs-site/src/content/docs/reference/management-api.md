@@ -102,7 +102,7 @@ See [Combos](/guides/combos/) for target strategies, cooldowns, aliases, and rou
 | --- | --- | --- |
 | `GET /api/config` | Return the redacted, management-safe configuration DTO | — |
 | `PUT /api/config` | Disabled full-config replacement guard | 405; use focused endpoints instead |
-| `GET, PUT /api/settings` | Read runtime/startup settings or update auto-start, stream mode, app-owned memory budget, and `codexAccountPickerEnabled` | 400 invalid, non-object, or empty update |
+| `GET, PUT /api/settings` | Read runtime/startup settings or update auto-start, stream mode, app-owned memory budget, `codexAccountPickerEnabled`, and `codexAccountPickerShowPoolModels` | 400 invalid, non-object, or empty update |
 | `GET /api/startup-health` | Read cached service/shim startup health | — |
 | `POST /api/startup-action` | Install or repair the service or Codex shim | 400 invalid action; 500 action failure |
 | `GET, POST /api/windows-tray` | Read Windows tray state or install/start/stop/uninstall it | 400 unsupported platform/action; 500 operation failure |
@@ -227,10 +227,13 @@ whether to star the repository.
 
 ### Codex authentication delegation
 
-`GET /api/settings` reports the effective `codexAccountPickerEnabled` boolean. A `PUT` containing
-that strict boolean initializes privacy-safe account selectors when enabling an empty map, preserves
-existing selector labels when disabling or re-enabling, persists first, and then requests one bounded
-catalog convergence only when effective picker visibility changed. The successful response includes
+`GET /api/settings` reports the effective `codexAccountPickerEnabled` boolean and the stored
+`codexAccountPickerShowPoolModels` preference. The latter is inert while the picker is disabled,
+but remains stored so re-enabling the picker restores the user's previous presentation choice.
+A `PUT` containing either strict boolean initializes
+privacy-safe account selectors when enabling an empty map, preserves existing selector labels,
+and can keep ordinary Pool/Direct rows visible beside exact-account rows. It persists first, then
+requests one bounded catalog convergence only when effective picker visibility changed. The successful response includes
 `catalogRefreshPending`: `false` means the catalog commit completed (or no refresh was needed), while
 `true` means the setting was saved but `POST /api/sync` should be used to retry the catalog refresh.
 Persistence or selector-allocation failure rolls the in-memory settings back and does not run

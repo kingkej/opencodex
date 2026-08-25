@@ -203,4 +203,45 @@ describe("modelPickerOrder (#1649)", () => {
     expect([...withOrder].sort()).toEqual([...baseline].sort());
     expect(withOrder.length).toBe(MAX_SPAWN_AGENT_MODEL_OVERRIDES);
   });
+
+  test("additive account rows stay between Pool and picker-ordered providers without changing candidates", () => {
+    const buildMode = (showPoolNativeModels: boolean, modelPickerOrder?: string[]) =>
+      buildCatalogEntriesFromObservedState({
+        template: template() as never,
+        gptSlugs: ["gpt-5.5", "gpt-5.4"],
+        goModels,
+        featured: [],
+        modelPickerOrder,
+        wsEnabled: false,
+        multiAgentMode: "default",
+        exactComboSlugs: new Set(),
+        accountSelectors: ["desktop", "team"],
+        // Replacement mode hides the automatic Pool rows; additive mode keeps them visible.
+        // Mirror the convergence layer here so candidate parity is measured against the real
+        // replacement catalog instead of an impossible hybrid containing both row families.
+        suppressedBareNativeSlugs: showPoolNativeModels
+          ? new Set()
+          : new Set(["gpt-5.5", "gpt-5.4"]),
+        disabledNativeAccountSlugs: new Set(),
+        showPoolNativeModels,
+        multiAgentV2Enabled: false,
+      });
+    const replacement = buildMode(false);
+    const additive = buildMode(true, [
+      "tyler/deepseek-v4-pro",
+      "jd-chat/kimi-k3",
+    ]);
+    const replacementCandidates = effectiveSubagentRoster([], "default", replacement)
+      .candidates.map(candidate => candidate.model);
+    const additiveCandidates = effectiveSubagentRoster([], "default", additive)
+      .candidates.map(candidate => candidate.model);
+    const bySlug = new Map(additive.map(entry => [String(entry.slug), entry]));
+    const poolPriority = bySlug.get("gpt-5.5")?.priority as number;
+    const explicitPriority = bySlug.get("desktop/gpt-5.5")?.priority as number;
+    const orderedProviderPriority = bySlug.get("tyler/deepseek-v4-pro")?.priority as number;
+
+    expect(poolPriority).toBeLessThan(explicitPriority);
+    expect(explicitPriority).toBeLessThan(orderedProviderPriority);
+    expect([...additiveCandidates].sort()).toEqual([...replacementCandidates].sort());
+  });
 });

@@ -122,6 +122,7 @@ describe("GET /api/settings", () => {
   test("reports the effective account-picker state", async () => {
     const absent = await (await getSettings(baseConfig()))!.json() as {
       codexAccountPickerEnabled?: boolean;
+      codexAccountPickerShowPoolModels?: boolean;
     };
     const inferred = await (await getSettings({
       ...baseConfig(),
@@ -131,11 +132,38 @@ describe("GET /api/settings", () => {
       ...baseConfig(),
       codexAccountNamespaces: { side: "stored-account" },
       codexAccountPickerEnabled: false,
-    }))!.json() as { codexAccountPickerEnabled?: boolean };
+    }))!.json() as {
+      codexAccountPickerEnabled?: boolean;
+      codexAccountPickerShowPoolModels?: boolean;
+    };
+    const latentPoolPreference = await (await getSettings({
+      ...baseConfig(),
+      codexAccountNamespaces: { side: "stored-account" },
+      codexAccountPickerEnabled: false,
+      codexAccountPickerShowPoolModels: true,
+    }))!.json() as {
+      codexAccountPickerEnabled?: boolean;
+      codexAccountPickerShowPoolModels?: boolean;
+    };
+    const both = await (await getSettings({
+      ...baseConfig(),
+      codexAccountNamespaces: { side: "stored-account" },
+      codexAccountPickerEnabled: true,
+      codexAccountPickerShowPoolModels: true,
+    }))!.json() as {
+      codexAccountPickerEnabled?: boolean;
+      codexAccountPickerShowPoolModels?: boolean;
+    };
 
     expect(absent.codexAccountPickerEnabled).toBe(false);
+    expect(absent.codexAccountPickerShowPoolModels).toBe(false);
     expect(inferred.codexAccountPickerEnabled).toBe(true);
     expect(hidden.codexAccountPickerEnabled).toBe(false);
+    expect(hidden.codexAccountPickerShowPoolModels).toBe(false);
+    expect(latentPoolPreference.codexAccountPickerEnabled).toBe(false);
+    expect(latentPoolPreference.codexAccountPickerShowPoolModels).toBe(true);
+    expect(both.codexAccountPickerEnabled).toBe(true);
+    expect(both.codexAccountPickerShowPoolModels).toBe(true);
   });
 
   test("reports redacted codexRuntime diagnostics and clamp correlation", async () => {
@@ -355,6 +383,53 @@ describe("PUT /api/settings", () => {
     expect(convergences).toBe(0);
   });
 
+  test("account-picker can keep automatic Pool models beside explicit account rows", async () => {
+    const config = {
+      ...baseConfig(),
+      codexAccountNamespaces: { main: "@main" },
+      codexAccountPickerEnabled: true,
+    };
+    let persisted = false;
+    let convergences = 0;
+    const response = await putSettings(config, { codexAccountPickerShowPoolModels: true }, {
+      saveConfigPreservingClaudeCode: saved => {
+        persisted = true;
+        expect(saved.codexAccountPickerShowPoolModels).toBe(true);
+      },
+      createManagementConvergeCodex: catalogConvergenceFactory(() => {
+        expect(persisted).toBe(true);
+        convergences += 1;
+      }),
+    });
+
+    expect(response!.status).toBe(200);
+    expect(await response!.json()).toMatchObject({
+      codexAccountPickerEnabled: true,
+      codexAccountPickerShowPoolModels: true,
+      catalogRefreshPending: false,
+    });
+    expect(config.codexAccountPickerShowPoolModels).toBe(true);
+    expect(convergences).toBe(1);
+  });
+
+  test("Pool-model companion setting does not refresh while account rows are disabled", async () => {
+    const config = baseConfig();
+    let convergences = 0;
+    const response = await putSettings(config, { codexAccountPickerShowPoolModels: true }, {
+      saveConfigPreservingClaudeCode: () => {},
+      createManagementConvergeCodex: catalogConvergenceFactory(() => { convergences += 1; }),
+    });
+
+    expect(response!.status).toBe(200);
+    expect(await response!.json()).toMatchObject({
+      codexAccountPickerEnabled: false,
+      codexAccountPickerShowPoolModels: true,
+      catalogRefreshPending: false,
+    });
+    expect(config.codexAccountPickerShowPoolModels).toBe(true);
+    expect(convergences).toBe(0);
+  });
+
   test("account-picker convergence failure remains a successful persisted mutation", async () => {
     const config = {
       ...baseConfig(),
@@ -443,6 +518,19 @@ describe("PUT /api/settings", () => {
     let persisted = false;
     let refreshed = false;
     const response = await putSettings(baseConfig(), { codexAccountPickerEnabled: "yes" }, {
+      saveConfigPreservingClaudeCode: () => { persisted = true; },
+      createManagementConvergeCodex: catalogConvergenceFactory(() => { refreshed = true; }),
+    });
+
+    expect(response!.status).toBe(400);
+    expect(persisted).toBe(false);
+    expect(refreshed).toBe(false);
+  });
+
+  test("account-picker Pool-model companion rejects non-boolean values", async () => {
+    let persisted = false;
+    let refreshed = false;
+    const response = await putSettings(baseConfig(), { codexAccountPickerShowPoolModels: "yes" }, {
       saveConfigPreservingClaudeCode: () => { persisted = true; },
       createManagementConvergeCodex: catalogConvergenceFactory(() => { refreshed = true; }),
     });

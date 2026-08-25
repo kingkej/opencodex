@@ -12,8 +12,8 @@ OpenAI 항목에는 네이티브 Codex 로그인과 네임스페이스가 붙은
 경로라는 두 가지 credential 경로가 있습니다. `codexAccountMode`만 Pool과 Direct 사이에서 바꾸는 것은
 선택기 id를 바꾸지 않습니다. 하지만 `codexAccountPickerEnabled`로 계정 한정 선택기 행이 활성화되어 있고
 `codexAccountNamespaces`에 대상 계정이 존재하는 selector가 있으면,
-opencodex는 매핑된 계정별로 `<selector>/<native-openai-model>` 행을 추가하고 선택기에서 bare native 행을
-숨깁니다. Selector 이름은 사용자가 정하는 공개 label이며 내장된 계정 역할 의미가 없습니다. `selector`가
+opencodex는 매핑된 계정별로 `<selector>/<native-openai-model>` 행을 추가하고 기본적으로 선택기에서 bare native 행을
+숨깁니다. `codexAccountPickerShowPoolModels: true`를 설정하면 자동 Pool/Direct 행도 계정 한정 행과 함께 표시됩니다. Selector 이름은 사용자가 정하는 공개 label이며 내장된 계정 역할 의미가 없습니다. `selector`가
 붙은 행을 선택하면 매핑된 계정만 사용하고 활성 Pool 계정은 바뀌지 않습니다. 대상 계정을 사용할 수 없으면
 다른 계정으로 전환하지 않고 요청이 실패합니다. 자세한 내용은 [명시적 Codex 계정 selector](/reference/configuration/routing/#exact-codex-account-selectors)를
 참고하세요.
@@ -106,7 +106,7 @@ GPT-5.6에만 사용합니다. 오래된 템플릿으로 근사하지 않고 모
 | 경로 | 선택기 id와 카탈로그 메타데이터 |
 | --- | --- |
 | Codex 로그인(계정 한정 선택기 행 비활성) | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` 같은 bare native id를 표시하고 `codexAccountMode`에 따라 Pool 또는 Direct를 사용합니다. GPT-5.6 행의 카탈로그 창은 922,000토큰입니다. |
-| Codex 로그인(계정 한정 선택기 행 활성, 유효한 selector 있음) | 유효한 selector와 지원되는 native model의 각 조합마다 `<selector>/<native-openai-model>` 행을 표시합니다. 각 행은 매핑된 계정만 사용하며 bare native 행은 선택기에서 숨깁니다. Native metadata와 context window는 보존됩니다. |
+| Codex 로그인(계정 한정 선택기 행 활성, 유효한 selector 있음) | 유효한 selector와 지원되는 native model의 각 조합마다 `<selector>/<native-openai-model>` 행을 표시합니다. 각 행은 매핑된 계정만 사용합니다. bare native 행은 기본적으로 숨기지만 `codexAccountPickerShowPoolModels: true`이면 자동 Pool/Direct 선택으로 계속 표시합니다. Native metadata와 context window는 보존됩니다. |
 | Codex 로그인(명시적 Daybreak forward 행) | canonical `openai` provider에 정확한 `customModels` 항목이 있을 때만 `openai/gpt-daybreak-blue-latest`를 표시합니다. Daybreak wire id를 유지하고 고정된 Sol capability snapshot(컨텍스트 922,000; 자동 압축점 922,000)을 사용합니다. |
 | OpenAI(API key) | 정확히 열 개의 네임스페이스 행: `gpt-5.5`, `gpt-5.6`, Sol/Terra/Luna, 세 개의 `*-pro` 가상 id, 두 Daybreak 별칭 (모두 컨텍스트 922,000; 최대 입력 922,000) |
 | OpenRouter | `openrouter/openai/gpt-5.6-sol`, `openrouter/openai/gpt-5.6-terra`, `openrouter/openai/gpt-5.6-luna` (922,000) |

@@ -87,7 +87,7 @@ Session 簽發在需要 data-plane 認證時停用，這包含遠端綁定。遠
 | --- | --- | --- |
 | `GET /api/config` | 回傳遮罩後、管理安全的設定 DTO | — |
 | `PUT /api/config` | 停用的全設定取代防護 | 405；請改用聚焦端點 |
-| `GET, PUT /api/settings` | 讀取 runtime/啟動設定或更新自動啟動、串流模式與 app 擁有記憶體預算 | 400 無效或空更新 |
+| `GET, PUT /api/settings` | 讀取 runtime/啟動設定或更新自動啟動、串流模式、app 擁有記憶體預算、`codexAccountPickerEnabled` 與 `codexAccountPickerShowPoolModels` | 400 無效或空更新 |
 | `GET /api/startup-health` | 讀取快取的服務／shim 啟動健康 | — |
 | `POST /api/startup-action` | 安裝或修復服務或 Codex shim | 400 無效動作；500 動作失敗 |
 | `GET, POST /api/windows-tray` | 讀取 Windows tray 狀態或安裝／啟動／停止／解除安裝它 | 400 不支援平台／動作；500 操作失敗 |
@@ -196,6 +196,11 @@ Session 簽發在需要 data-plane 認證時停用，這包含遠端綁定。遠
 | `POST /api/stop` | 停止服務、還原原生 Codex、移除受管 Grok 注入並排空代理 | 409 服務擁有權衝突 |
 
 ### Codex 認證委派
+
+`GET /api/settings` 會回傳實際生效的 `codexAccountPickerEnabled` 布林值與已儲存的
+`codexAccountPickerShowPoolModels` 偏好。後者在 picker 停用時不會生效，但會保留，
+以便重新啟用時恢復先前的顯示選擇。包含任一嚴格布林值的 `PUT` 會先持久化設定，
+並只在實際 picker 可見性改變時要求一次有界 catalog convergence。
 
 根管理分派器將每個 `/api/codex-auth/*` 請求委派給 Codex 帳號管理員。其路由為：
 

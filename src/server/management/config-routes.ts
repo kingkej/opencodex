@@ -298,6 +298,7 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
       streamMode: config.streamMode ?? "auto",
       appOwnedMemoryBudgetMb: config.appOwnedMemoryBudgetMb ?? 256,
       codexAccountPickerEnabled: codexAccountPickerEnabled(config),
+      codexAccountPickerShowPoolModels: config.codexAccountPickerShowPoolModels === true,
       // Absent means the historical auto-open, so the GUI can render the toggle
       // without having to know that `undefined` and `true` mean the same thing.
       oauthOpenBrowser: config.oauthOpenBrowser !== false,
@@ -386,13 +387,15 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
       appOwnedMemoryBudgetMb?: unknown;
       codexAccountPickerEnabled?: unknown;
       oauthOpenBrowser?: unknown;
+      codexAccountPickerShowPoolModels?: unknown;
     };
     if (body.codexAutoStart === undefined
       && body.streamMode === undefined
       && body.appOwnedMemoryBudgetMb === undefined
       && body.codexAccountPickerEnabled === undefined
+      && body.codexAccountPickerShowPoolModels === undefined
       && body.oauthOpenBrowser === undefined) {
-      return jsonResponse({ error: "provide codexAutoStart, streamMode, appOwnedMemoryBudgetMb, codexAccountPickerEnabled, or oauthOpenBrowser" }, 400);
+      return jsonResponse({ error: "provide codexAutoStart, streamMode, appOwnedMemoryBudgetMb, codexAccountPickerEnabled, codexAccountPickerShowPoolModels, or oauthOpenBrowser" }, 400);
     }
     if (body.codexAutoStart !== undefined && typeof body.codexAutoStart !== "boolean") {
       return jsonResponse({ error: "codexAutoStart boolean is required" }, 400);
@@ -406,6 +409,10 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
     if (body.codexAccountPickerEnabled !== undefined
       && typeof body.codexAccountPickerEnabled !== "boolean") {
       return jsonResponse({ error: "codexAccountPickerEnabled boolean is required" }, 400);
+    }
+    if (body.codexAccountPickerShowPoolModels !== undefined
+      && typeof body.codexAccountPickerShowPoolModels !== "boolean") {
+      return jsonResponse({ error: "codexAccountPickerShowPoolModels boolean is required" }, 400);
     }
     if (body.appOwnedMemoryBudgetMb !== undefined && (
       typeof body.appOwnedMemoryBudgetMb !== "number"
@@ -426,11 +433,15 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
       hasCodexAccountNamespaces: Object.hasOwn(config, "codexAccountNamespaces"),
       codexAccountPickerEnabled: config.codexAccountPickerEnabled,
       hasCodexAccountPickerEnabled: Object.hasOwn(config, "codexAccountPickerEnabled"),
+      codexAccountPickerShowPoolModels: config.codexAccountPickerShowPoolModels,
+      hasCodexAccountPickerShowPoolModels: Object.hasOwn(config, "codexAccountPickerShowPoolModels"),
       oauthOpenBrowser: config.oauthOpenBrowser,
       hasOauthOpenBrowser: Object.hasOwn(config, "oauthOpenBrowser"),
     };
     const pickerWasEnabled = codexAccountPickerEnabled(config);
+    const poolModelsWereShown = config.codexAccountPickerShowPoolModels === true;
     let pickerIsEnabled = pickerWasEnabled;
+    let poolModelsAreShown = poolModelsWereShown;
     try {
       if (typeof body.codexAutoStart === "boolean") {
         config.codexAutoStart = body.codexAutoStart;
@@ -451,10 +462,14 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
       } else if (body.codexAccountPickerEnabled === false) {
         config.codexAccountPickerEnabled = false;
       }
+      if (typeof body.codexAccountPickerShowPoolModels === "boolean") {
+        config.codexAccountPickerShowPoolModels = body.codexAccountPickerShowPoolModels;
+      }
       if (typeof body.oauthOpenBrowser === "boolean") {
         config.oauthOpenBrowser = body.oauthOpenBrowser;
       }
       pickerIsEnabled = codexAccountPickerEnabled(config);
+      poolModelsAreShown = config.codexAccountPickerShowPoolModels === true;
       (deps.saveConfigPreservingClaudeCode ?? saveConfigPreservingClaudeCode)(config);
     } catch (error) {
       if (previousSettings.hasCodexAutoStart) config.codexAutoStart = previousSettings.codexAutoStart;
@@ -470,6 +485,9 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
       if (previousSettings.hasCodexAccountPickerEnabled) {
         config.codexAccountPickerEnabled = previousSettings.codexAccountPickerEnabled;
       } else delete config.codexAccountPickerEnabled;
+      if (previousSettings.hasCodexAccountPickerShowPoolModels) {
+        config.codexAccountPickerShowPoolModels = previousSettings.codexAccountPickerShowPoolModels;
+      } else delete config.codexAccountPickerShowPoolModels;
       if (previousSettings.hasOauthOpenBrowser) {
         config.oauthOpenBrowser = previousSettings.oauthOpenBrowser;
       } else delete config.oauthOpenBrowser;
@@ -480,6 +498,7 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
       enforceAppOwnedMemoryBudget();
     }
     const catalogRefresh = pickerWasEnabled !== pickerIsEnabled
+      || (pickerIsEnabled && poolModelsWereShown !== poolModelsAreShown)
       ? await convergeCodexCatalog()
       : undefined;
     const catalogRefreshPending = catalogRefresh
@@ -492,6 +511,7 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
       streamMode: config.streamMode ?? "auto",
       appOwnedMemoryBudgetMb: config.appOwnedMemoryBudgetMb ?? 256,
       codexAccountPickerEnabled: pickerIsEnabled,
+      codexAccountPickerShowPoolModels: poolModelsAreShown,
       oauthOpenBrowser: config.oauthOpenBrowser !== false,
       catalogRefreshPending,
       startupHealth: await readStartupHealth(config),

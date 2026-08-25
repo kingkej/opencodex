@@ -29,6 +29,16 @@ function response(body: unknown, status = 200): Response {
   });
 }
 
+function pickerSettings(
+  codexAccountPickerEnabled: boolean,
+  codexAccountPickerShowPoolModels = false,
+): {
+  codexAccountPickerEnabled: boolean;
+  codexAccountPickerShowPoolModels: boolean;
+} {
+  return { codexAccountPickerEnabled, codexAccountPickerShowPoolModels };
+}
+
 describe("CodexAccountPickerSetting", () => {
   beforeEach(() => {
     previousDomGlobals = Object.fromEntries(
@@ -74,8 +84,18 @@ describe("CodexAccountPickerSetting", () => {
   }
 
   function toggle(host: ParentNode): HTMLButtonElement {
-    const button = host.querySelector<HTMLButtonElement>("button.toggle");
+    const button = host.querySelector<HTMLButtonElement>(
+      'button.toggle[aria-label="Target a specific Codex account from the model picker"]',
+    );
     if (!button) throw new Error("toggle missing");
+    return button;
+  }
+
+  function poolModelsToggle(host: ParentNode): HTMLButtonElement {
+    const button = host.querySelector<HTMLButtonElement>(
+      'button.toggle[aria-label="Keep automatic Pool models in the picker"]',
+    );
+    if (!button) throw new Error("pool models toggle missing");
     return button;
   }
 
@@ -88,7 +108,7 @@ describe("CodexAccountPickerSetting", () => {
     expect(host.textContent).not.toMatch(/Personal|Work/);
 
     await act(async () => {
-      settings.resolve(response({ codexAccountPickerEnabled: true }));
+      settings.resolve(response(pickerSettings(true)));
       await flush();
     });
     expect(toggle(host).getAttribute("aria-pressed")).toBe("true");
@@ -96,6 +116,93 @@ describe("CodexAccountPickerSetting", () => {
     expect(host.textContent).toContain("stable privacy-safe labels");
     expect(host.textContent).toContain("Existing conversations and saved model selections continue routing");
     expect(host.textContent).toContain("Plain GPT model IDs keep their Pool or Direct behavior");
+  });
+
+  test("loads automatic Pool model visibility only when account targeting is enabled", async () => {
+    const host = await mount((async () => response(pickerSettings(true, true))) as typeof fetch);
+
+    expect(host.querySelectorAll("button.toggle")).toHaveLength(2);
+    expect(poolModelsToggle(host).getAttribute("aria-pressed")).toBe("true");
+    expect(poolModelsToggle(host).getAttribute("aria-describedby"))
+      .toBe("codex-account-picker-pool-models-description");
+    expect(host.textContent).toContain("Keep automatic Pool models in the picker");
+    expect(host.textContent).toContain("stay visible alongside account selectors");
+  });
+
+  test("defaults the additive Pool field off when an older server omits it", async () => {
+    const host = await mount((async () => response({
+      codexAccountPickerEnabled: true,
+    })) as typeof fetch);
+
+    expect(toggle(host).getAttribute("aria-pressed")).toBe("true");
+    expect(poolModelsToggle(host).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("accepts an older PUT response when updating the original picker field", async () => {
+    const host = await mount((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        return response({
+          ok: true,
+          codexAccountPickerEnabled: true,
+          catalogRefreshPending: false,
+        });
+      }
+      return response(pickerSettings(false));
+    }) as typeof fetch);
+
+    await act(async () => {
+      toggle(host).click();
+      await flush();
+    });
+
+    expect(toggle(host).getAttribute("aria-pressed")).toBe("true");
+    expect(poolModelsToggle(host).getAttribute("aria-pressed")).toBe("false");
+    expect(host.textContent).toContain("Account targeting updated");
+  });
+
+  test("rejects an older PUT response that cannot confirm the additive field", async () => {
+    const host = await mount((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        return response({
+          ok: true,
+          codexAccountPickerEnabled: true,
+          catalogRefreshPending: false,
+        });
+      }
+      return response(pickerSettings(true));
+    }) as typeof fetch);
+
+    await act(async () => {
+      poolModelsToggle(host).click();
+      await flush();
+    });
+
+    expect(poolModelsToggle(host).getAttribute("aria-pressed")).toBe("false");
+    expect(host.textContent).toContain("Could not update automatic Pool model visibility");
+  });
+
+  test("toggles automatic Pool model visibility with its dedicated setting field", async () => {
+    let putBody: unknown;
+    const host = await mount((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        putBody = JSON.parse(String(init.body));
+        return response({
+          ok: true,
+          ...pickerSettings(true, true),
+          catalogRefreshPending: false,
+        });
+      }
+      return response(pickerSettings(true));
+    }) as typeof fetch);
+
+    await act(async () => {
+      poolModelsToggle(host).click();
+      await flush();
+    });
+
+    expect(putBody).toEqual({ codexAccountPickerShowPoolModels: true });
+    expect(poolModelsToggle(host).getAttribute("aria-pressed")).toBe("true");
+    expect(host.textContent).toContain("Automatic Pool model visibility updated");
   });
 
   test("serializes rapid clicks and trusts the confirmed response state", async () => {
@@ -106,7 +213,7 @@ describe("CodexAccountPickerSetting", () => {
         puts += 1;
         return pendingPut.promise;
       }
-      return response({ codexAccountPickerEnabled: false });
+      return response(pickerSettings(false));
     }) as typeof fetch);
 
     act(() => {
@@ -120,7 +227,7 @@ describe("CodexAccountPickerSetting", () => {
     await act(async () => {
       pendingPut.resolve(response({
         ok: true,
-        codexAccountPickerEnabled: false,
+        ...pickerSettings(false),
         catalogRefreshPending: false,
       }));
       await flush();
@@ -134,12 +241,12 @@ describe("CodexAccountPickerSetting", () => {
       if (init?.method === "PUT") {
         return response({
           ok: true,
-          codexAccountPickerEnabled: true,
+          ...pickerSettings(true),
           catalogRefreshPending: true,
           privateDetail: "private-account-detail",
         });
       }
-      return response({ codexAccountPickerEnabled: false });
+      return response(pickerSettings(false));
     }) as typeof fetch);
 
     await act(async () => {
@@ -155,7 +262,7 @@ describe("CodexAccountPickerSetting", () => {
   test("failed saves revert the optimistic toggle and show only generic feedback", async () => {
     const host = await mount((async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "PUT") return response({ error: "private server path" }, 500);
-      return response({ codexAccountPickerEnabled: false });
+      return response(pickerSettings(false));
     }) as typeof fetch);
 
     await act(async () => {
@@ -171,7 +278,7 @@ describe("CodexAccountPickerSetting", () => {
     let shouldFail = true;
     const host = await mount((async () => {
       if (shouldFail) return response({ error: "private server path" }, 500);
-      return response({ codexAccountPickerEnabled: true });
+      return response(pickerSettings(true));
     }) as typeof fetch);
 
     expect(host.querySelector("button.toggle")).toBeNull();
@@ -205,13 +312,13 @@ describe("CodexAccountPickerSetting", () => {
         putCount += 1;
         return response({
           ok: true,
-          codexAccountPickerEnabled: false,
+          ...pickerSettings(false),
           catalogRefreshPending: false,
         });
       }
       getCount += 1;
       return getCount === 1
-        ? response({ codexAccountPickerEnabled: true })
+        ? response(pickerSettings(true))
         : response({ error: "temporary" }, 503);
     }) as typeof fetch);
 
@@ -249,7 +356,7 @@ describe("CodexAccountPickerSetting", () => {
       if (init?.method === "PUT") return pendingPut.promise;
       getCount += 1;
       return getCount === 1
-        ? response({ codexAccountPickerEnabled: false })
+        ? response(pickerSettings(false))
         : stalePoll.promise;
     }) as typeof fetch);
 
@@ -262,7 +369,7 @@ describe("CodexAccountPickerSetting", () => {
     expect(toggle(host).getAttribute("aria-pressed")).toBe("true");
 
     await act(async () => {
-      stalePoll.resolve(response({ codexAccountPickerEnabled: false }));
+      stalePoll.resolve(response(pickerSettings(false)));
       await flush();
     });
     expect(toggle(host).getAttribute("aria-pressed")).toBe("true");
@@ -270,7 +377,7 @@ describe("CodexAccountPickerSetting", () => {
     await act(async () => {
       pendingPut.resolve(response({
         ok: true,
-        codexAccountPickerEnabled: true,
+        ...pickerSettings(true),
         catalogRefreshPending: false,
       }));
       await flush();

@@ -82,11 +82,34 @@ export const MAX_SPAWN_AGENT_MODEL_OVERRIDES = 5;
 // priority captured before the override), so display order and spawn candidates are decoupled.
 export const PICKER_ORDER_PRIORITY_BASE = 1_000;
 
+// Additive account-picker mode uses display-only bands so automatic Pool rows stay first,
+// exact-account rows follow, and ordinary provider rows remain after both. The natural priority
+// is retained in SPAWN_PRIORITY_FIELD, so changing picker presentation does not remove explicit
+// account choices from the spawn_agent candidate window.
+export const ACCOUNT_PICKER_EXPLICIT_PRIORITY_BASE = 1_000;
+export const ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE = 2_000;
+export const ACCOUNT_PICKER_POOL_SPAWN_PRIORITY_BASE = 1_000_000;
+
 // OpenCodex-private catalog field: the spawn_agent candidate priority a row would have WITHOUT
 // modelPickerOrder. Codex ignores unknown catalog fields (same as opencodex_catalog_kind), so this
 // is invisible to Codex; effectiveSubagentRoster reads it so a display reorder cannot change which
 // rows are spawn_agent candidates. Absent on rows modelPickerOrder did not move.
 export const SPAWN_PRIORITY_FIELD = "opencodex_spawn_priority";
+// OpenCodex-private marker for ordinary provider rows whose visible priority is in the additive
+// account-picker display band. Numeric bands overlap for sufficiently large modelPickerOrder
+// lists, so degraded discovery must use explicit provenance instead of guessing from priority.
+export const ADDITIVE_PICKER_DISPLAY_FIELD = "opencodex_additive_picker_display";
+// Exact Codex-visible priority an additive provider row should regain when account selectors are
+// disabled. modelPickerOrder uses a selector-dependent stride, so spawn priority alone cannot
+// reconstruct this value during a degraded reverse transition.
+export const PICKER_DISABLED_DISPLAY_PRIORITY_FIELD = "opencodex_picker_disabled_priority";
+// Selector-mode spawn rank retained while the account picker is disabled. Most rows can derive it
+// as no-picker + 1_000, but degraded low-rank rows intentionally preserve values below 1_000.
+export const PICKER_DISABLED_SELECTOR_SPAWN_FIELD = "opencodex_picker_disabled_selector_spawn";
+// Archived only while a degraded ordinary provider row is projected into the featured band.
+// Active spawn selection ignores these fields; demotion uses them to restore ordinary semantics.
+export const FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD = "opencodex_featured_ordinary_no_picker_spawn";
+export const FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD = "opencodex_featured_ordinary_selector_spawn";
 
 export type SpawnAgentSurface = "v1" | "v2";
 
@@ -414,6 +437,8 @@ export interface ObservedCatalogEntryBuildInput {
   readonly accountSelectors: readonly string[];
   readonly suppressedBareNativeSlugs: ReadonlySet<string>;
   readonly disabledNativeAccountSlugs: ReadonlySet<string>;
+  /** Display automatic Pool rows before exact-account rows instead of replacing them. */
+  readonly showPoolNativeModels?: boolean;
   readonly multiAgentV2Enabled: boolean;
   readonly keepNativeChatGptOnV1?: boolean;
   readonly openaiContextCap?: NativeContextLimitsInput;
@@ -439,6 +464,7 @@ export function buildCatalogEntries(
   accountNativeSlugs?: readonly string[],
   accountNativeSlugsBySelector?: ReadonlyMap<string, readonly string[]>,
   keepNativeChatGptOnV1 = false,
+  showPoolNativeModels = false,
 ): RawEntry[] {
   return buildCatalogEntriesFromObservedState({
     template,
@@ -451,6 +477,7 @@ export function buildCatalogEntries(
     accountSelectors,
     suppressedBareNativeSlugs,
     disabledNativeAccountSlugs,
+    showPoolNativeModels,
     multiAgentV2Enabled: isMultiAgentV2Enabled(),
     keepNativeChatGptOnV1,
     openaiContextCap: contextCap,
@@ -472,6 +499,7 @@ export function buildCatalogEntriesFromObservedState({
   accountSelectors,
   suppressedBareNativeSlugs,
   disabledNativeAccountSlugs,
+  showPoolNativeModels = false,
   multiAgentV2Enabled,
   keepNativeChatGptOnV1,
   openaiContextCap,
@@ -511,11 +539,18 @@ export function buildCatalogEntriesFromObservedState({
    * logic and are intentionally not reordered here — this matches the documented contract on
    * OcxConfig.modelPickerOrder (route native ordering through subagentModels instead).
    */
-  const pickerOrderPriority = (slug: string, altSlug?: string): number | undefined => {
+  const pickerOrderHit = (slug: string, altSlug?: string): number | undefined => {
     if (!pickerOrderActive) return undefined;
-    const hit = pickerOrderRank.get(slug) ?? (altSlug !== undefined ? pickerOrderRank.get(altSlug) : undefined);
+    return pickerOrderRank.get(slug)
+      ?? (altSlug !== undefined ? pickerOrderRank.get(altSlug) : undefined);
+  };
+  const pickerOrderPriority = (slug: string, altSlug?: string): number | undefined => {
+    const hit = pickerOrderHit(slug, altSlug);
     if (hit === undefined) return undefined;
-    return PICKER_ORDER_PRIORITY_BASE + hit * priorityStride;
+    const base = showPoolNativeModels && accountSelectors.length > 0
+      ? ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE
+      : PICKER_ORDER_PRIORITY_BASE;
+    return base + hit * priorityStride;
   };
   const out: RawEntry[] = [];
   const nativeEntries: RawEntry[] = [];
@@ -592,9 +627,15 @@ export function buildCatalogEntriesFromObservedState({
       // inherit the bare alias rank and consume another top spawn_agent slot.
       const inheritedRank = emittedNativeAliasSlugs.has(nativeSlug) ? undefined : rank.get(nativeSlug);
       const featuredRank = exactRank ?? inheritedRank;
-      e.priority = featuredRank !== undefined
+      const naturalPriority = featuredRank !== undefined
         ? featuredRank * priorityStride + selectorIndex
         : ((featured?.length ?? 0) + nativeIndex) * accountSelectors.length + selectorIndex;
+      if (showPoolNativeModels) {
+        e[SPAWN_PRIORITY_FIELD] = naturalPriority;
+        e.priority = ACCOUNT_PICKER_EXPLICIT_PRIORITY_BASE + naturalPriority;
+      } else {
+        e.priority = naturalPriority;
+      }
       e.visibility = "list";
       out.push(e);
     }
@@ -627,7 +668,17 @@ export function buildCatalogEntriesFromObservedState({
     if (rankHit !== undefined) e.priority = rankHit * priorityStride;
     else if (accountSelectors.length > 0) {
       // Keep the generated account rows together in Codex's priority-sorted flat picker.
-      e.priority = 1_000 + (typeof e.priority === "number" ? e.priority : 5);
+      const naturalPriority = typeof e.priority === "number" ? e.priority : 5;
+      if (showPoolNativeModels) {
+        // Replacement mode gives ordinary provider rows the 1_000+ priority. Preserve that exact
+        // candidate rank while using 2_000+ only for additive picker display.
+        e[SPAWN_PRIORITY_FIELD] = PICKER_ORDER_PRIORITY_BASE + naturalPriority;
+        e[ADDITIVE_PICKER_DISPLAY_FIELD] = true;
+        e[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD] = naturalPriority;
+      }
+      e.priority = (showPoolNativeModels
+        ? ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE
+        : PICKER_ORDER_PRIORITY_BASE) + naturalPriority;
     }
     // #1649: modelPickerOrder is a DISPLAY-ONLY override. Record the natural priority spawn_agent
     // must keep using, then let modelPickerOrder move only the Codex-visible `priority`. Featured
@@ -635,7 +686,14 @@ export function buildCatalogEntriesFromObservedState({
     if (rankHit === undefined) {
       const pickerPriority = pickerOrderPriority(slug, `${m.provider}/${m.id}`);
       if (pickerPriority !== undefined) {
-        e[SPAWN_PRIORITY_FIELD] = typeof e.priority === "number" ? e.priority : 5;
+        const existingSpawnPriority = e[SPAWN_PRIORITY_FIELD];
+        if (typeof existingSpawnPriority !== "number" || !Number.isFinite(existingSpawnPriority)) {
+          e[SPAWN_PRIORITY_FIELD] = typeof e.priority === "number" ? e.priority : 5;
+        }
+        if (showPoolNativeModels && accountSelectors.length > 0) {
+          const hit = pickerOrderHit(slug, `${m.provider}/${m.id}`)!;
+          e[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD] = PICKER_ORDER_PRIORITY_BASE + hit;
+        }
         e.priority = pickerPriority;
       }
     }
@@ -651,6 +709,15 @@ export function buildCatalogEntriesFromObservedState({
       // Snapshot-backed native entries carry prefer_websockets: never advertise a preference
       // for an endpoint ocx has disabled.
       delete entry.prefer_websockets;
+    }
+  }
+  if (showPoolNativeModels && accountSelectors.length > 0) {
+    const bareNativeSlugs = new Set(gptSlugs);
+    for (const entry of out) {
+      if (typeof entry.slug !== "string" || !bareNativeSlugs.has(entry.slug)) continue;
+      const displayPriority = typeof entry.priority === "number" && Number.isFinite(entry.priority)
+        ? entry.priority : 9;
+      entry[SPAWN_PRIORITY_FIELD] = ACCOUNT_PICKER_POOL_SPAWN_PRIORITY_BASE + displayPriority;
     }
   }
   return applyMultiAgentMode(out, multiAgentMode, multiAgentV2Enabled, {
@@ -769,6 +836,12 @@ export interface ObservedCatalogMergeInput {
   readonly hasPhysicalComboProvider: boolean;
   readonly includeNativeOpenAi: boolean;
   readonly accountBoundEntries: readonly RawEntry[];
+  /** Number of configured account selectors, used by featured-model priority stride. */
+  readonly accountSelectorCount?: number;
+  /** Keep ordinary Pool/Direct native rows visible beside explicit account selectors. */
+  readonly showPoolNativeModels?: boolean;
+  /** Current display-only provider ordering, used to preserve degraded reverse transitions. */
+  readonly modelPickerOrder?: readonly string[];
   readonly suppressedBareNativeSlugs?: ReadonlySet<string>;
   readonly policy: ObservedCatalogMergePolicy;
   readonly openaiContextCap?: NativeContextLimitsInput;
@@ -800,6 +873,9 @@ export function mergeCatalogEntriesFromObservedState({
   hasPhysicalComboProvider,
   includeNativeOpenAi,
   accountBoundEntries,
+  accountSelectorCount,
+  showPoolNativeModels = false,
+  modelPickerOrder,
   suppressedBareNativeSlugs = new Set(),
   policy,
   openaiContextCap,
@@ -987,10 +1063,41 @@ export function mergeCatalogEntriesFromObservedState({
     aligned.slug = entry.slug;
     aligned.display_name = entry.display_name;
     aligned.priority = entry.priority;
+    const spawnPriority = entry[SPAWN_PRIORITY_FIELD];
+    if (typeof spawnPriority === "number" && Number.isFinite(spawnPriority)) {
+      aligned[SPAWN_PRIORITY_FIELD] = spawnPriority;
+    } else {
+      delete aligned[SPAWN_PRIORITY_FIELD];
+    }
     aligned.visibility = "list";
     aligned.opencodex_catalog_kind = CODEX_ACCOUNT_BOUND_CATALOG_KIND;
     return aligned;
   });
+  const additiveAccountPickerActive = showPoolNativeModels
+    && alignedAccountBoundEntries.length > 0;
+  const effectiveAccountSelectorCount = typeof accountSelectorCount === "number"
+    && Number.isInteger(accountSelectorCount)
+    && accountSelectorCount >= 0
+    ? accountSelectorCount
+    : new Set(alignedAccountBoundEntries.flatMap(entry => {
+      if (typeof entry.slug !== "string") return [];
+      const slash = entry.slug.indexOf("/");
+      return slash > 0 ? [entry.slug.slice(0, slash)] : [];
+    })).size;
+  const currentPickerOrder = Array.isArray(modelPickerOrder)
+    ? modelPickerOrder.filter((slug): slug is string => typeof slug === "string" && slug.length > 0)
+    : [];
+  const currentPickerOrderRank = (slug: string): number | undefined => {
+    const hit = currentPickerOrder.findIndex(configured => slugsEquivalent(configured, slug));
+    return hit >= 0 ? hit : undefined;
+  };
+  const pickerDisabledDisplayPriority = (slug: string, spawnPriority: number): number => {
+    const hit = currentPickerOrderRank(slug);
+    if (hit !== undefined) return PICKER_ORDER_PRIORITY_BASE + hit;
+    return spawnPriority >= PICKER_ORDER_PRIORITY_BASE
+      ? spawnPriority - PICKER_ORDER_PRIORITY_BASE
+      : spawnPriority;
+  };
 
   const freshSlugs = new Set(
     admittedRoutedEntries.flatMap(entry => typeof entry.slug === "string" ? [entry.slug] : []),
@@ -1024,7 +1131,246 @@ export function mergeCatalogEntriesFromObservedState({
     // remain outside provider ownership and survive unless a fresh row replaces their exact slug.
     return !isOcxAuthoredRoutedEntry(entry);
   });
-  let finalRoutedEntries = [...admittedRoutedEntries, ...preservedRoutedEntries];
+  const preservedOutputByOriginal = new Map<RawEntry, RawEntry>();
+  const orderedPreservedRoutedEntries = preservedRoutedEntries.map(entry => {
+    if (!isOcxAuthoredRoutedEntry(entry)
+      || typeof entry.slug !== "string") {
+      preservedOutputByOriginal.set(entry, entry);
+      return entry;
+    }
+    const featuredRank = featured.findIndex(model => slugsEquivalent(model, entry.slug as string));
+    const priorityStride = Math.max(effectiveAccountSelectorCount, 1);
+    const archivedNoPickerSpawn = entry[FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD];
+    const archivedSelectorSpawn = entry[FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD];
+    const hasArchivedOrdinaryPriorities = typeof archivedNoPickerSpawn === "number"
+      && Number.isFinite(archivedNoPickerSpawn)
+      && typeof archivedSelectorSpawn === "number"
+      && Number.isFinite(archivedSelectorSpawn);
+    if (featuredRank >= 0) {
+      const featuredEntry = structuredClone(entry) as RawEntry;
+      if (!hasArchivedOrdinaryPriorities) {
+        const activeSpawn = entry[SPAWN_PRIORITY_FIELD];
+        const disabledSelectorSpawn = entry[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+        let selectorSpawn: number;
+        let noPickerSpawn: number;
+        if (effectiveAccountSelectorCount === 0
+          && typeof disabledSelectorSpawn === "number"
+          && Number.isFinite(disabledSelectorSpawn)) {
+          selectorSpawn = disabledSelectorSpawn;
+          noPickerSpawn = typeof activeSpawn === "number" && Number.isFinite(activeSpawn)
+            ? activeSpawn
+            : selectorSpawn >= PICKER_ORDER_PRIORITY_BASE
+              ? selectorSpawn - PICKER_ORDER_PRIORITY_BASE
+              : selectorSpawn;
+        } else if (typeof activeSpawn === "number" && Number.isFinite(activeSpawn)) {
+          if (effectiveAccountSelectorCount > 0) {
+            selectorSpawn = activeSpawn;
+            noPickerSpawn = selectorSpawn >= PICKER_ORDER_PRIORITY_BASE
+              ? selectorSpawn - PICKER_ORDER_PRIORITY_BASE
+              : selectorSpawn;
+          } else {
+            noPickerSpawn = activeSpawn;
+            const storedSelectorSpawn = entry[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+            selectorSpawn = typeof storedSelectorSpawn === "number" && Number.isFinite(storedSelectorSpawn)
+              ? storedSelectorSpawn
+              : PICKER_ORDER_PRIORITY_BASE + noPickerSpawn;
+          }
+        } else if (entry[ADDITIVE_PICKER_DISPLAY_FIELD] === true) {
+          const currentPriority = typeof entry.priority === "number" && Number.isFinite(entry.priority)
+            ? entry.priority : ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE + 5;
+          const offset = Math.max(0, currentPriority - ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE);
+          selectorSpawn = PICKER_ORDER_PRIORITY_BASE + offset;
+          noPickerSpawn = offset;
+        } else {
+          const currentPriority = typeof entry.priority === "number" && Number.isFinite(entry.priority)
+            ? entry.priority : 5;
+          const featuredPriority = featuredRank * priorityStride;
+          if (currentPriority !== featuredPriority) {
+            if (effectiveAccountSelectorCount > 0) {
+              selectorSpawn = currentPriority;
+              noPickerSpawn = selectorSpawn >= PICKER_ORDER_PRIORITY_BASE
+                ? selectorSpawn - PICKER_ORDER_PRIORITY_BASE
+                : selectorSpawn;
+            } else {
+              noPickerSpawn = currentPriority;
+              selectorSpawn = PICKER_ORDER_PRIORITY_BASE + noPickerSpawn;
+            }
+          } else {
+            // A row first discovered while already featured has no prior ordinary projection.
+            // Provider rows derive from natural priority 5 in every catalog builder.
+            noPickerSpawn = 5;
+            selectorSpawn = PICKER_ORDER_PRIORITY_BASE + noPickerSpawn;
+          }
+        }
+        featuredEntry[FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD] = noPickerSpawn;
+        featuredEntry[FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD] = selectorSpawn;
+      }
+      featuredEntry.priority = featuredRank * priorityStride;
+      delete featuredEntry[SPAWN_PRIORITY_FIELD];
+      delete featuredEntry[ADDITIVE_PICKER_DISPLAY_FIELD];
+      delete featuredEntry[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD];
+      delete featuredEntry[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+      preservedOutputByOriginal.set(entry, featuredEntry);
+      return featuredEntry;
+    }
+    if (hasArchivedOrdinaryPriorities) {
+      const restored = structuredClone(entry) as RawEntry;
+      const noPickerSpawn = archivedNoPickerSpawn as number;
+      const selectorSpawn = archivedSelectorSpawn as number;
+      const pickerRank = currentPickerOrderRank(entry.slug);
+      if (additiveAccountPickerActive) {
+        const displayOffset = pickerRank !== undefined
+          ? pickerRank * priorityStride
+          : selectorSpawn >= PICKER_ORDER_PRIORITY_BASE
+            ? selectorSpawn - PICKER_ORDER_PRIORITY_BASE
+            : selectorSpawn;
+        restored.priority = ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE + displayOffset;
+        restored[SPAWN_PRIORITY_FIELD] = selectorSpawn;
+        restored[ADDITIVE_PICKER_DISPLAY_FIELD] = true;
+        restored[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD] = pickerDisabledDisplayPriority(
+          entry.slug,
+          noPickerSpawn,
+        );
+        delete restored[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+      } else if (effectiveAccountSelectorCount > 0) {
+        restored.priority = pickerRank !== undefined
+          ? PICKER_ORDER_PRIORITY_BASE + pickerRank * priorityStride
+          : selectorSpawn;
+        if (restored.priority === selectorSpawn) delete restored[SPAWN_PRIORITY_FIELD];
+        else restored[SPAWN_PRIORITY_FIELD] = selectorSpawn;
+        delete restored[ADDITIVE_PICKER_DISPLAY_FIELD];
+        delete restored[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD];
+        delete restored[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+      } else {
+        restored.priority = pickerDisabledDisplayPriority(entry.slug, noPickerSpawn);
+        if (restored.priority === noPickerSpawn) delete restored[SPAWN_PRIORITY_FIELD];
+        else restored[SPAWN_PRIORITY_FIELD] = noPickerSpawn;
+        delete restored[ADDITIVE_PICKER_DISPLAY_FIELD];
+        delete restored[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD];
+        restored[PICKER_DISABLED_SELECTOR_SPAWN_FIELD] = selectorSpawn;
+      }
+      delete restored[FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD];
+      delete restored[FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD];
+      preservedOutputByOriginal.set(entry, restored);
+      return restored;
+    }
+    const disabledSelectorSpawn = entry[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+    if (typeof disabledSelectorSpawn === "number"
+      && Number.isFinite(disabledSelectorSpawn)) {
+      const restored = structuredClone(entry) as RawEntry;
+      const pickerRank = currentPickerOrderRank(entry.slug);
+      if (additiveAccountPickerActive) {
+        const displayOffset = pickerRank !== undefined
+          ? pickerRank * priorityStride
+          : disabledSelectorSpawn >= PICKER_ORDER_PRIORITY_BASE
+            ? disabledSelectorSpawn - PICKER_ORDER_PRIORITY_BASE
+            : disabledSelectorSpawn;
+        restored.priority = ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE + displayOffset;
+        restored[SPAWN_PRIORITY_FIELD] = disabledSelectorSpawn;
+        restored[ADDITIVE_PICKER_DISPLAY_FIELD] = true;
+        const activeNoPickerSpawn = entry[SPAWN_PRIORITY_FIELD];
+        const noPickerSpawn = typeof activeNoPickerSpawn === "number" && Number.isFinite(activeNoPickerSpawn)
+          ? activeNoPickerSpawn
+          : typeof entry.priority === "number" && Number.isFinite(entry.priority)
+            ? entry.priority
+            : 5;
+        restored[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD] = pickerDisabledDisplayPriority(
+          entry.slug,
+          noPickerSpawn,
+        );
+        delete restored[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+      } else if (effectiveAccountSelectorCount > 0) {
+        restored.priority = pickerRank !== undefined
+          ? PICKER_ORDER_PRIORITY_BASE + pickerRank * priorityStride
+          : disabledSelectorSpawn;
+        if (restored.priority === disabledSelectorSpawn) delete restored[SPAWN_PRIORITY_FIELD];
+        else restored[SPAWN_PRIORITY_FIELD] = disabledSelectorSpawn;
+        delete restored[ADDITIVE_PICKER_DISPLAY_FIELD];
+        delete restored[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD];
+        delete restored[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+      } else {
+        const noPickerSpawn = disabledSelectorSpawn >= PICKER_ORDER_PRIORITY_BASE
+          ? disabledSelectorSpawn - PICKER_ORDER_PRIORITY_BASE
+          : disabledSelectorSpawn;
+        restored.priority = pickerDisabledDisplayPriority(entry.slug, noPickerSpawn);
+        if (restored.priority === noPickerSpawn) delete restored[SPAWN_PRIORITY_FIELD];
+        else restored[SPAWN_PRIORITY_FIELD] = noPickerSpawn;
+        delete restored[ADDITIVE_PICKER_DISPLAY_FIELD];
+        delete restored[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD];
+        restored[PICKER_DISABLED_SELECTOR_SPAWN_FIELD] = disabledSelectorSpawn;
+      }
+      preservedOutputByOriginal.set(entry, restored);
+      return restored;
+    }
+    const storedAdditiveDisplay = entry[ADDITIVE_PICKER_DISPLAY_FIELD] === true;
+    if (!additiveAccountPickerActive && !storedAdditiveDisplay) {
+      preservedOutputByOriginal.set(entry, entry);
+      return entry;
+    }
+    const rebased = structuredClone(entry) as RawEntry;
+    const displayPriority = typeof rebased.priority === "number" && Number.isFinite(rebased.priority)
+      ? rebased.priority : 5;
+    const storedSpawnPriority = rebased[SPAWN_PRIORITY_FIELD];
+    const spawnPriority = typeof storedSpawnPriority === "number" && Number.isFinite(storedSpawnPriority)
+      ? storedSpawnPriority
+      : undefined;
+    const providerDisplayOffset = storedAdditiveDisplay
+      ? Math.max(0, displayPriority - ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE)
+      : displayPriority >= PICKER_ORDER_PRIORITY_BASE
+        ? displayPriority - PICKER_ORDER_PRIORITY_BASE
+        : displayPriority;
+    if (!additiveAccountPickerActive) {
+      const selectorSpawnPriority = spawnPriority
+        ?? PICKER_ORDER_PRIORITY_BASE + providerDisplayOffset;
+      if (alignedAccountBoundEntries.length > 0) {
+        rebased.priority = selectorSpawnPriority < PICKER_ORDER_PRIORITY_BASE
+          ? selectorSpawnPriority
+          : PICKER_ORDER_PRIORITY_BASE + providerDisplayOffset;
+        if (rebased.priority === selectorSpawnPriority) delete rebased[SPAWN_PRIORITY_FIELD];
+        else rebased[SPAWN_PRIORITY_FIELD] = selectorSpawnPriority;
+        delete rebased[PICKER_DISABLED_SELECTOR_SPAWN_FIELD];
+      } else {
+        const noPickerSpawnPriority = selectorSpawnPriority >= PICKER_ORDER_PRIORITY_BASE
+          ? selectorSpawnPriority - PICKER_ORDER_PRIORITY_BASE
+          : selectorSpawnPriority;
+        rebased.priority = pickerDisabledDisplayPriority(entry.slug, noPickerSpawnPriority);
+        if (rebased.priority === noPickerSpawnPriority) delete rebased[SPAWN_PRIORITY_FIELD];
+        else rebased[SPAWN_PRIORITY_FIELD] = noPickerSpawnPriority;
+        rebased[PICKER_DISABLED_SELECTOR_SPAWN_FIELD] = selectorSpawnPriority;
+      }
+      delete rebased[ADDITIVE_PICKER_DISPLAY_FIELD];
+      delete rebased[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD];
+      preservedOutputByOriginal.set(entry, rebased);
+      return rebased;
+    }
+    let replacementPriority: number;
+    if (spawnPriority !== undefined) {
+      replacementPriority = spawnPriority;
+    } else if (storedAdditiveDisplay) {
+      replacementPriority = PICKER_ORDER_PRIORITY_BASE + providerDisplayOffset;
+    } else {
+      // A retained replacement-mode row may legitimately occupy the low priority band (for
+      // example, priority 1). Keep that exact spawn rank while moving only its picker display
+      // after explicit account rows. Prior additive rows carry explicit display provenance and
+      // are handled above without inferring their mode from an overlapping numeric band.
+      replacementPriority = displayPriority;
+    }
+    const noPickerSpawnPriority = replacementPriority >= PICKER_ORDER_PRIORITY_BASE
+      ? replacementPriority - PICKER_ORDER_PRIORITY_BASE
+      : replacementPriority;
+    const storedDisabledPriority = rebased[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD];
+    rebased[SPAWN_PRIORITY_FIELD] = replacementPriority;
+    rebased[ADDITIVE_PICKER_DISPLAY_FIELD] = true;
+    rebased[PICKER_DISABLED_DISPLAY_PRIORITY_FIELD] =
+      typeof storedDisabledPriority === "number" && Number.isFinite(storedDisabledPriority)
+        ? storedDisabledPriority
+        : pickerDisabledDisplayPriority(entry.slug, noPickerSpawnPriority);
+    rebased.priority = ACCOUNT_PICKER_PROVIDER_PRIORITY_BASE
+      + Math.max(0, providerDisplayOffset);
+    preservedOutputByOriginal.set(entry, rebased);
+    return rebased;
+  });
+  let finalRoutedEntries = [...admittedRoutedEntries, ...orderedPreservedRoutedEntries];
   finalRoutedEntries = finalRoutedEntries.filter(entry => {
     const slug = typeof entry.slug === "string" ? entry.slug : "";
     if (!slug.includes("/")) return true;
@@ -1070,13 +1416,21 @@ export function mergeCatalogEntriesFromObservedState({
   });
   const finalRoutedEntrySet = new Set(finalRoutedEntries);
   const degradedPreservedCount = preservedRoutedEntries.filter(entry => {
-    if (!finalRoutedEntrySet.has(entry)) return false;
+    if (!finalRoutedEntrySet.has(preservedOutputByOriginal.get(entry) ?? entry)) return false;
     const slug = entry.slug as string;
     const provider = slug.slice(0, slug.indexOf("/"));
     return gatheredProviderNames.has(provider) && degradedProviderNames.has(provider);
   }).length;
   if (degradedPreservedCount > 0 && policy.warningPolicy === "emit") {
     console.warn(`[opencodex] catalog sync: provider discovery degraded; preserving ${degradedPreservedCount} existing routed entr${degradedPreservedCount === 1 ? "y" : "ies"} on disk.`);
+  }
+
+  if (additiveAccountPickerActive) {
+    for (const entry of native) {
+      const displayPriority = typeof entry.priority === "number" && Number.isFinite(entry.priority)
+        ? entry.priority : 9;
+      entry[SPAWN_PRIORITY_FIELD] = ACCOUNT_PICKER_POOL_SPAWN_PRIORITY_BASE + displayPriority;
+    }
   }
 
   const managedEntries = [...finalRoutedEntries, ...alignedAccountBoundEntries];
@@ -1118,7 +1472,12 @@ export function mergeCatalogEntriesFromObservedState({
   // clobber a hide flag back to list. Bare ids disable every account clone; qualified ids disable
   // only their generated account row.
   const versionedEntries = applyMultiAgentMode(
-    applyNativeVisibility(mergedEntries, disabledModels, alignedAccountBoundEntries.length > 0, observedNativeSlugs),
+    applyNativeVisibility(
+      mergedEntries,
+      disabledModels,
+      alignedAccountBoundEntries.length > 0 && !showPoolNativeModels,
+      observedNativeSlugs,
+    ),
     multiAgentMode,
     multiAgentV2Enabled,
     { keepNativeChatGptOnV1 },
@@ -1160,6 +1519,7 @@ export function mergeCatalogEntriesForSync(
   ),
   openaiContextCap?: NativeContextLimitsInput,
   keepNativeChatGptOnV1 = false,
+  showPoolNativeModels = false,
 ): RawEntry[] {
   // Retained for source compatibility with the original helper contract. Raw provider ids must
   // not suppress same-named native rows; actual admitted combo entries own that decision now.
@@ -1194,6 +1554,7 @@ export function mergeCatalogEntriesForSync(
     hasPhysicalComboProvider,
     includeNativeOpenAi,
     accountBoundEntries,
+    showPoolNativeModels,
     suppressedBareNativeSlugs,
     openaiContextCap,
     policy: {
@@ -1515,6 +1876,7 @@ function writeRetainedCatalogSync({
     accountSelectors,
     suppressedBareNativeSlugs,
     disabledNativeAccountSlugs: new Set(),
+    showPoolNativeModels: config.codexAccountPickerShowPoolModels === true,
     multiAgentV2Enabled,
     openaiContextCap,
   });
@@ -1560,6 +1922,7 @@ function writeRetainedCatalogSync({
       accountSelectors,
       suppressedBareNativeSlugs,
       disabledNativeAccountSlugs: new Set([...disabledNativeSlugs(config)].filter(slug => suppressedBareNativeSlugs.has(slug))),
+      showPoolNativeModels: config.codexAccountPickerShowPoolModels === true,
       multiAgentV2Enabled,
       keepNativeChatGptOnV1: config.keepNativeChatGptOnV1 === true,
       openaiContextCap,
@@ -1587,6 +1950,9 @@ function writeRetainedCatalogSync({
     hasPhysicalComboProvider,
     includeNativeOpenAi,
     accountBoundEntries,
+    accountSelectorCount: accountSelectors.length,
+    showPoolNativeModels: config.codexAccountPickerShowPoolModels === true,
+    modelPickerOrder: config.modelPickerOrder,
     suppressedBareNativeSlugs,
     openaiContextCap,
     policy: {

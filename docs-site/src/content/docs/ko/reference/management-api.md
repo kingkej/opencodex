@@ -87,7 +87,7 @@ Authorization: Bearer <admin-token>
 | --- | --- | --- |
 | `GET /api/config` | redacted된 management-safe configuration DTO를 반환합니다 | — |
 | `PUT /api/config` | 전체 구성 교체 방지 기능이 비활성화되어 있습니다 | 405; 대신 집중된 엔드포인트를 사용하십시오 |
-| `GET, PUT /api/settings` | 런타임/시작 설정을 읽거나 auto-start, stream mode, 앱 소유 memory budget, `codexAccountPickerEnabled`를 업데이트합니다 | 400 잘못됨, object 아님, 또는 비어 있는 업데이트 |
+| `GET, PUT /api/settings` | 런타임/시작 설정을 읽거나 auto-start, stream mode, 앱 소유 memory budget, `codexAccountPickerEnabled`, `codexAccountPickerShowPoolModels`를 업데이트합니다 | 400 잘못됨, object 아님, 또는 비어 있는 업데이트 |
 | `GET /api/startup-health` | 캐시된 서비스/shim 시작 상태를 읽습니다 | — |
 | `POST /api/startup-action` | 서비스 또는 Codex shim을 설치하거나 복구합니다 | 400 잘못된 작업; 500 작업 실패 |
 | `GET, POST /api/windows-tray` | Windows tray 상태를 읽거나 설치, 시작, 중지, 제거합니다 | 400 지원되지 않는 플랫폼/작업; 500 작업 실패 |
@@ -197,7 +197,9 @@ Authorization: Bearer <admin-token>
 
 ### Codex 인증 위임
 
-`GET /api/settings`는 유효한 `codexAccountPickerEnabled` boolean을 반환합니다. 이 strict boolean을
+`GET /api/settings`는 유효한 `codexAccountPickerEnabled` boolean과 저장된
+`codexAccountPickerShowPoolModels` 설정을 반환합니다. 후자는 picker가 비활성화된 동안에는
+효과가 없지만 다시 활성화할 때 이전 표시 선택을 복원하도록 저장됩니다. 두 strict boolean 중 하나를
 `PUT`하면 빈 map을 활성화할 때 privacy-safe selector를 초기화하고 기존 label을 보존한 채 먼저
 영속화한 다음, 유효한 picker 표시가 바뀐 경우에만 bounded catalog convergence를 한 번 요청합니다.
 성공 응답의 `catalogRefreshPending: true`는 설정은 저장되었지만 `POST /api/sync` 재시도가 필요하다는 뜻입니다.

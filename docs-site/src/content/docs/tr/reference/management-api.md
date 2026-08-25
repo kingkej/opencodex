@@ -109,7 +109,7 @@ Hedef stratejileri, soğuma süreleri, takma adlar ve yönlendirme hataları iç
 | --- | --- | --- |
 | `GET /api/config` | Maskelenmiş, yönetim açısından güvenli yapılandırma DTO'sunu döndürün | — |
 | `PUT /api/config` | Devre dışı bırakılmış tam yapılandırma değiştirme koruması | 405; bunun yerine odaklanmış uç noktaları kullanın |
-| `GET, PUT /api/settings` | Çalışma zamanı/başlangıç ayarlarını okuyun veya otomatik başlatmayı, akış modunu, uygulamaya ait bellek bütçesini ve `codexAccountPickerEnabled`'ı güncelleyin | 400 geçersiz, nesne olmayan veya boş güncelleme |
+| `GET, PUT /api/settings` | Çalışma zamanı/başlangıç ayarlarını okuyun veya otomatik başlatmayı, akış modunu, uygulamaya ait bellek bütçesini, `codexAccountPickerEnabled` ve `codexAccountPickerShowPoolModels` ayarlarını güncelleyin | 400 geçersiz, nesne olmayan veya boş güncelleme |
 | `GET /api/startup-health` | Önbelleğe alınmış servis/dolgu başlangıç sağlığını okuyun | — |
 | `POST /api/startup-action` | Servisi veya Codex dolgusunu kurun veya onarın | 400 geçersiz eylem; 500 eylem hatası |
 | `GET, POST /api/windows-tray` | Windows tepsisi durumunu okuyun veya kurun/başlatın/durdurun/kaldırın | 400 desteklenmeyen platform/eylem; 500 işlem hatası |
@@ -237,8 +237,10 @@ dolaşmamalıdır. Depoya yıldız verip vermeyeceğini kullanıcı seçmelidir.
 
 ### Codex kimlik doğrulama yetkilendirmesi
 
-`GET /api/settings`, geçerli `codexAccountPickerEnabled` boolean değerini
-bildirir. Bu katı boolean'ı içeren bir `PUT`, boş bir haritayı etkinleştirirken
+`GET /api/settings`, geçerli `codexAccountPickerEnabled` boolean değerini ve
+kaydedilmiş `codexAccountPickerShowPoolModels` tercihini bildirir. İkincisi picker
+devre dışıyken etkisizdir, ancak yeniden etkinleştirildiğinde önceki görünüm seçimini
+geri yüklemek için saklanır. Katı boolean'lardan birini içeren bir `PUT`, boş bir haritayı etkinleştirirken
 gizlilik açısından güvenli hesap seçicilerini başlatır, devre dışı bırakırken
 veya yeniden etkinleştirirken mevcut seçici etiketlerini korur, önce kalıcı hale
 getirir ve ardından yalnızca geçerli seçici görünürlüğü değiştiğinde sınırlı bir
@@ -300,5 +302,3 @@ rehberli iş akışını sağlar. Başsız ana bilgisayarlar ve otomasyon için 
 olduğunda veya işlem başarısız olduğunda sıfır olmayan bir sonuç döndürürler.
 Doğrudan HTTP, yukarıdaki tam uç nokta sözleşmelerine ihtiyaç duyan
 entegrasyonlar için en yararlıdır.
-
-

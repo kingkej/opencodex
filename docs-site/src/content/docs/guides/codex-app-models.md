@@ -13,7 +13,9 @@ itself does not change picker ids. When account-qualified picker rows are enable
 `codexAccountPickerEnabled` and `codexAccountNamespaces` has eligible selectors whose
 mapped accounts still exist, however,
 opencodex adds separate `<selector>/<native-openai-model>` rows for the mapped accounts and hides
-the bare native rows from the Codex picker. Selector labels are user-chosen public names with no
+the bare native rows from the Codex picker by default. Set
+`codexAccountPickerShowPoolModels: true` to list the ordinary automatic Pool/Direct rows alongside
+the account-qualified rows. Selector labels are user-chosen public names with no
 built-in account-role meaning. Selecting a qualified row uses only its mapped account, does not
 change the active Pool account, and fails closed instead of switching accounts when the target is
 unavailable. If Codex's account-scoped catalog contains a visible, API-supported OpenAI-family id
@@ -58,7 +60,8 @@ When the `codexAccountNamespaces` map is empty, account-qualified picker rows ar
 `codexAccountPickerEnabled` is omitted with a non-empty map, they are treated as enabled for
 backward compatibility. Set it to `false` to hide generated qualified rows and restore bare native
 rows in the picker without deleting mappings or disabling exact
-`<selector>/<native-openai-model>` routing.
+`<selector>/<native-openai-model>` routing. Alternatively, leave it enabled and set
+`codexAccountPickerShowPoolModels` to `true` to show both automatic and exact-account choices.
 
 API GPT-5.6 and Daybreak entries use
 1,050,000 context / 922,000 max input, and `*-pro` picker ids resolve to the base wire model with
@@ -136,7 +139,7 @@ metadata instead of an older-template approximation.
 | Route | Picker ids and catalog metadata |
 | --- | --- |
 | Codex login (account-qualified rows disabled) | Bare native ids such as `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; Pool or Direct is selected through `codexAccountMode`. GPT-5.6 rows use a 922,000-token catalog window. |
-| Codex login (account-qualified rows enabled with eligible selectors) | One `<selector>/<native-openai-model>` row per eligible selector and supported native model; each row uses only its mapped account, and bare native rows are hidden from the picker. Native metadata and context windows are preserved. |
+| Codex login (account-qualified rows enabled with eligible selectors) | One `<selector>/<native-openai-model>` row per eligible selector and supported native model; each row uses only its mapped account. Bare native rows are hidden by default, or remain visible as automatic Pool/Direct choices when `codexAccountPickerShowPoolModels: true`. Native metadata and context windows are preserved. |
 | Codex login (explicit Daybreak forward row) | `openai/gpt-daybreak-blue-latest` only when the exact `customModels` row is configured on the canonical `openai` provider. It keeps the Daybreak wire id and uses the pinned Sol capability snapshot (922,000 context; 829,800 automatic compaction). |
 | OpenAI (API key) | Exactly ten namespaced rows: `gpt-5.5`, `gpt-5.6`, Sol/Terra/Luna, the three `*-pro` virtual ids, and the two Daybreak aliases (1,050,000 context; 922,000 max input for all ten) |
 | OpenRouter | `openrouter/openai/gpt-5.6-sol`, `openrouter/openai/gpt-5.6-terra`, `openrouter/openai/gpt-5.6-luna` (922,000) |

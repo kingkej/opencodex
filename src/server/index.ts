@@ -1096,14 +1096,12 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
           // Disabled natives stay in the catalog shape with visibility "hide" (mirrors the
           // on-disk sync; codex-rs keeps them out of the picker itself).
           const maMode = config.multiAgentMode === "v1" || config.multiAgentMode === "v2" ? config.multiAgentMode : "default";
-          // Account rows use the same hidden-inclusive supported set as on-disk sync. This lets a
-          // newly re-enabled native reappear under each selector before the next sync, while the
-          // no-selector path keeps nativeOpenAiSlugs()'s existing visibility-sensitive behavior.
+          // Bare rows keep only the entitlement-filtered static native set that upstream resolved
+          // for this request. Account-only observations are passed separately below so they can
+          // create selector-qualified rows without leaking an unsafe global identity. The
+          // no-selector path keeps nativeOpenAiSlugs()'s visibility-sensitive behavior.
           const catalogNativeSlugs = accountSelectors.length > 0
-            ? [...new Set([
-              ...availableAccountNativeSlugs,
-              ...accountNativeSlugs,
-            ])]
+            ? availableAccountNativeSlugs
             : nativeSlugs;
           const entries = buildCatalogEntries(
             loadCatalogTemplate(),
@@ -1120,12 +1118,13 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
             accountNativeSlugs,
             accountNativeSlugsBySelector,
             config.keepNativeChatGptOnV1 === true,
+            config.codexAccountPickerShowPoolModels === true,
           );
           return jsonResponse({
             models: applyNativeVisibility(
               entries,
               disabledModels,
-              accountSelectors.length > 0,
+              accountSelectors.length > 0 && config.codexAccountPickerShowPoolModels !== true,
               new Set(accountNativeSlugs),
             ),
           }, 200, req, policy);

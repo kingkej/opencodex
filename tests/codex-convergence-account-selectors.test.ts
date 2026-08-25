@@ -15,11 +15,20 @@ import { join } from "node:path";
 import { captureCatalogAdmissionSnapshot } from "../src/codex/catalog-admission";
 import {
   CODEX_ACCOUNT_BOUND_CATALOG_KIND,
+  effectiveSubagentRoster,
   loadBundledCodexCatalog,
   NATIVE_OPENAI_MODELS,
   resetCatalogRuntimeStateForTests,
   syncCatalogModels,
 } from "../src/codex/catalog";
+import {
+  ADDITIVE_PICKER_DISPLAY_FIELD,
+  FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD,
+  FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD,
+  PICKER_DISABLED_DISPLAY_PRIORITY_FIELD,
+  PICKER_DISABLED_SELECTOR_SPAWN_FIELD,
+  SPAWN_PRIORITY_FIELD,
+} from "../src/codex/catalog/sync";
 import {
   commitCodexCatalogCandidate,
   convergeCodexCatalog,
@@ -143,7 +152,11 @@ function nativeMetadataEntry(
   };
 }
 
-function config(pickerEnabled: boolean, disabledModels: string[] = []): OcxConfig {
+function config(
+  pickerEnabled: boolean,
+  disabledModels: string[] = [],
+  showPoolModels = false,
+): OcxConfig {
   return {
     port: 10100,
     providers: {
@@ -165,6 +178,7 @@ function config(pickerEnabled: boolean, disabledModels: string[] = []): OcxConfi
       team: "side-account-id",
     },
     codexAccountPickerEnabled: pickerEnabled,
+    codexAccountPickerShowPoolModels: showPoolModels,
     disabledModels,
   };
 }
@@ -338,6 +352,39 @@ test("convergence preserves one configured soft budget on bare and account-nativ
       auto_compact_token_limit: 120_000,
     });
   }
+});
+
+test("convergence can list automatic Pool rows beside explicit account rows", async () => {
+  writeCatalog([nativeEntry()]);
+
+  const replacementModels = (await convergeCatalog(config(true))).models ?? [];
+  const replacementCandidates = effectiveSubagentRoster([], "v1", replacementModels)
+    .candidates.map(candidate => candidate.model);
+  const catalog = await convergeCatalog(config(true, [], true));
+  const models = catalog.models ?? [];
+
+  expect(models.find(entry => entry.slug === "gpt-5.6-sol")?.visibility).toBe("list");
+  expect(models.find(entry => entry.slug === "desktop/gpt-5.6-sol")).toMatchObject({
+    display_name: "desktop / 5.6 Sol",
+    visibility: "list",
+    opencodex_catalog_kind: CODEX_ACCOUNT_BOUND_CATALOG_KIND,
+  });
+  expect(models.find(entry => entry.slug === "team/gpt-5.6-sol")).toMatchObject({
+    display_name: "team / 5.6 Sol",
+    visibility: "list",
+    opencodex_catalog_kind: CODEX_ACCOUNT_BOUND_CATALOG_KIND,
+  });
+  const poolPriority = models.find(entry => entry.slug === "gpt-5.6-sol")?.priority;
+  const explicitPriorities = ["desktop/gpt-5.6-sol", "team/gpt-5.6-sol"]
+    .map(slug => models.find(entry => entry.slug === slug)?.priority);
+  expect(typeof poolPriority).toBe("number");
+  expect(explicitPriorities.every(priority => typeof priority === "number"
+    && priority > (poolPriority as number))).toBe(true);
+  const roster = effectiveSubagentRoster([], "v1", models);
+  const candidateModels = roster.candidates.map(candidate => candidate.model);
+  expect(candidateModels).toEqual(replacementCandidates);
+  expect(models.find(entry => entry.slug === "desktop/gpt-5.6-sol"))
+    .toHaveProperty(SPAWN_PRIORITY_FIELD);
 });
 
 test("disabling the picker removes generated rows, restores bare rows, and retains foreign rows", async () => {
@@ -536,6 +583,364 @@ test("convergence preserves only provider-local degraded rows", async () => {
   expect(models.some(entry => entry.slug === "empty/stale")).toBe(false);
   expect(models.some(entry => entry.slug === "removed/ghost")).toBe(false);
   expect(models.some(entry => entry.slug === "external/vendor-model")).toBe(true);
+});
+
+test("additive picker rebands provider rows retained during degraded discovery", async () => {
+  const initialCatalog = [
+    nativeEntry(),
+    { ...generatedRoutedEntry("offline/old-live"), priority: 1 },
+  ];
+  const offlineProvider = {
+    adapter: "openai-chat" as const,
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth" as const,
+    models: [] as string[],
+  };
+  writeCatalog(initialCatalog);
+  const replacementConfig = config(true);
+  replacementConfig.providers.offline = offlineProvider;
+  const replacementModels = (await convergeCatalog(replacementConfig)).models ?? [];
+  const replacementCandidates = effectiveSubagentRoster([], "v1", replacementModels)
+    .candidates.map(candidate => candidate.model);
+
+  writeCatalog(initialCatalog);
+  const nextConfig = config(true, [], true);
+  nextConfig.providers.offline = offlineProvider;
+
+  const models = (await convergeCatalog(nextConfig)).models ?? [];
+  const poolPriority = models.find(entry => entry.slug === "gpt-5.6-sol")?.priority as number;
+  const explicitPriorities = ["desktop/gpt-5.6-sol", "team/gpt-5.6-sol"]
+    .map(slug => models.find(entry => entry.slug === slug)?.priority as number);
+  const retained = models.find(entry => entry.slug === "offline/old-live");
+  const additiveCandidates = effectiveSubagentRoster([], "v1", models)
+    .candidates.map(candidate => candidate.model);
+
+  expect(explicitPriorities.every(priority => priority > poolPriority)).toBe(true);
+  expect(explicitPriorities.every(priority => (retained?.priority as number) > priority)).toBe(true);
+  expect(retained?.[SPAWN_PRIORITY_FIELD]).toBe(1);
+  expect(additiveCandidates).toEqual(replacementCandidates);
+});
+
+test("stored additive flag is inert when account picker selectors are disabled", async () => {
+  writeCatalog([
+    nativeEntry(),
+    { ...generatedRoutedEntry("offline/old-live"), priority: 1 },
+  ]);
+  const nextConfig = config(false, [], true);
+  nextConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+
+  const models = (await convergeCatalog(nextConfig)).models ?? [];
+  const retained = models.find(entry => entry.slug === "offline/old-live");
+
+  expect(retained?.priority).toBe(1);
+  expect(retained).not.toHaveProperty(SPAWN_PRIORITY_FIELD);
+});
+
+test("degraded additive transition preserves replacement modelPickerOrder offsets", async () => {
+  writeCatalog([nativeEntry()]);
+  const orderedSlugs = ["offline/second", "offline/first"];
+  const replacementConfig = config(true);
+  replacementConfig.modelPickerOrder = orderedSlugs;
+  replacementConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    liveModels: false,
+    models: ["first", "second"],
+  };
+  const replacementModels = (await convergeCatalog(replacementConfig)).models ?? [];
+  const replacementRows = orderedSlugs.map(slug => replacementModels.find(entry => entry.slug === slug));
+
+  const additiveConfig = config(true, [], true);
+  additiveConfig.modelPickerOrder = orderedSlugs;
+  additiveConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  const additiveModels = (await convergeCatalog(additiveConfig)).models ?? [];
+  const additiveRows = orderedSlugs.map(slug => additiveModels.find(entry => entry.slug === slug));
+
+  expect(replacementRows.map(entry => entry?.priority)).toEqual([1_000, 1_002]);
+  expect(additiveRows.map(entry => entry?.priority)).toEqual([2_000, 2_002]);
+  expect(additiveRows.map(entry => entry?.[SPAWN_PRIORITY_FIELD])).toEqual(
+    replacementRows.map(entry => entry?.[SPAWN_PRIORITY_FIELD]),
+  );
+});
+
+test("degraded additive transition does not misclassify an overlapping replacement priority", async () => {
+  writeCatalog([nativeEntry()]);
+  const target = "offline/boundary";
+  const replacementConfig = config(true);
+  replacementConfig.modelPickerOrder = [
+    ...Array.from({ length: 500 }, (_, index) => `missing/model-${index}`),
+    target,
+  ];
+  replacementConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    liveModels: false,
+    models: ["boundary"],
+  };
+  const replacementModels = (await convergeCatalog(replacementConfig)).models ?? [];
+  const replacement = replacementModels.find(entry => entry.slug === target);
+
+  const additiveConfig = config(true, [], true);
+  additiveConfig.modelPickerOrder = replacementConfig.modelPickerOrder;
+  additiveConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  const additiveModels = (await convergeCatalog(additiveConfig)).models ?? [];
+  const additive = additiveModels.find(entry => entry.slug === target);
+
+  expect(replacement?.priority).toBe(2_000);
+  expect(additive?.priority).toBe(3_000);
+  expect(additive?.[SPAWN_PRIORITY_FIELD]).toBe(replacement?.[SPAWN_PRIORITY_FIELD]);
+});
+
+test("degraded additive row restores replacement display mode when Pool rows are hidden", async () => {
+  writeCatalog([nativeEntry()]);
+  const target = "offline/retained";
+  const additiveConfig = config(true, [], true);
+  additiveConfig.modelPickerOrder = [target];
+  additiveConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    liveModels: false,
+    models: ["retained"],
+  };
+  const additiveModels = (await convergeCatalog(additiveConfig)).models ?? [];
+  const additive = additiveModels.find(entry => entry.slug === target);
+
+  const replacementConfig = config(true);
+  replacementConfig.modelPickerOrder = [target];
+  replacementConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  const replacementModels = (await convergeCatalog(replacementConfig)).models ?? [];
+  const replacement = replacementModels.find(entry => entry.slug === target);
+
+  expect(additive?.priority).toBe(2_000);
+  expect(additive?.[ADDITIVE_PICKER_DISPLAY_FIELD]).toBe(true);
+  expect(replacement?.priority).toBe(1_000);
+  expect(replacement?.[SPAWN_PRIORITY_FIELD]).toBe(additive?.[SPAWN_PRIORITY_FIELD]);
+  expect(replacement).not.toHaveProperty(ADDITIVE_PICKER_DISPLAY_FIELD);
+  expect(replacement).not.toHaveProperty(PICKER_DISABLED_DISPLAY_PRIORITY_FIELD);
+});
+
+test("degraded additive row restores no-picker display and spawn ranks when picker is disabled", async () => {
+  writeCatalog([nativeEntry()]);
+  const target = "offline/retained";
+  const additiveConfig = config(true, [], true);
+  additiveConfig.modelPickerOrder = [target];
+  additiveConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    liveModels: false,
+    models: ["retained"],
+  };
+  const additiveModels = (await convergeCatalog(additiveConfig)).models ?? [];
+  const additive = additiveModels.find(entry => entry.slug === target);
+
+  const disabledConfig = config(false, [], true);
+  disabledConfig.modelPickerOrder = [target];
+  disabledConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  const disabledModels = (await convergeCatalog(disabledConfig)).models ?? [];
+  const disabled = disabledModels.find(entry => entry.slug === target);
+
+  expect(additive?.priority).toBe(2_000);
+  expect(additive?.[SPAWN_PRIORITY_FIELD]).toBe(1_005);
+  expect(disabled?.priority).toBe(1_000);
+  expect(disabled?.[SPAWN_PRIORITY_FIELD]).toBe(5);
+  expect(disabledModels.some(entry => entry.slug === "desktop/gpt-5.6-sol")).toBe(false);
+  expect(disabled).not.toHaveProperty(ADDITIVE_PICKER_DISPLAY_FIELD);
+  expect(disabled).not.toHaveProperty(PICKER_DISABLED_DISPLAY_PRIORITY_FIELD);
+});
+
+test("degraded additive row promoted to featured clears additive metadata before reverse mode", async () => {
+  writeCatalog([nativeEntry()]);
+  const target = "offline/retained";
+  const additiveConfig = config(true, [], true);
+  additiveConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    liveModels: false,
+    models: ["retained"],
+  };
+  const additiveModels = (await convergeCatalog(additiveConfig)).models ?? [];
+  const additive = additiveModels.find(entry => entry.slug === target);
+
+  const replacementConfig = config(true);
+  replacementConfig.subagentModels = ["missing/model", target];
+  replacementConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  const replacementModels = (await convergeCatalog(replacementConfig)).models ?? [];
+  const replacement = replacementModels.find(entry => entry.slug === target);
+
+  expect(additive?.[ADDITIVE_PICKER_DISPLAY_FIELD]).toBe(true);
+  expect(replacement?.priority).toBe(2);
+  expect(replacement).not.toHaveProperty(SPAWN_PRIORITY_FIELD);
+  expect(replacement).not.toHaveProperty(ADDITIVE_PICKER_DISPLAY_FIELD);
+  expect(replacement).not.toHaveProperty(PICKER_DISABLED_DISPLAY_PRIORITY_FIELD);
+  expect(replacement?.[FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD]).toBe(5);
+  expect(replacement?.[FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD]).toBe(1_005);
+
+  const demotedConfig = config(true);
+  demotedConfig.providers.offline = replacementConfig.providers.offline;
+  const demotedModels = (await convergeCatalog(demotedConfig)).models ?? [];
+  const demoted = demotedModels.find(entry => entry.slug === target);
+
+  expect(demoted?.priority).toBe(1_005);
+  expect(demoted).not.toHaveProperty(SPAWN_PRIORITY_FIELD);
+  expect(demoted).not.toHaveProperty(FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD);
+  expect(demoted).not.toHaveProperty(FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD);
+});
+
+test("disabled featured promotion restores selector spawn rank when demoted into additive mode", async () => {
+  writeCatalog([nativeEntry()]);
+  const target = "offline/retained";
+  const disabledConfig = config(false, [], true);
+  disabledConfig.modelPickerOrder = [target];
+  disabledConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    liveModels: false,
+    models: ["retained"],
+  };
+  const disabledModels = (await convergeCatalog(disabledConfig)).models ?? [];
+  const disabled = disabledModels.find(entry => entry.slug === target);
+
+  const featuredConfig = config(false, [], true);
+  featuredConfig.modelPickerOrder = [target];
+  featuredConfig.subagentModels = [target];
+  featuredConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  const featuredModels = (await convergeCatalog(featuredConfig)).models ?? [];
+  const featured = featuredModels.find(entry => entry.slug === target);
+
+  const additiveConfig = config(true, [], true);
+  additiveConfig.modelPickerOrder = [target];
+  additiveConfig.providers.offline = featuredConfig.providers.offline;
+  const additiveModels = (await convergeCatalog(additiveConfig)).models ?? [];
+  const additive = additiveModels.find(entry => entry.slug === target);
+
+  expect(disabled?.priority).toBe(1_000);
+  expect(disabled?.[SPAWN_PRIORITY_FIELD]).toBe(5);
+  expect(featured?.priority).toBe(0);
+  expect(featured?.[FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD]).toBe(5);
+  expect(featured?.[FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD]).toBe(1_005);
+  expect(additive?.priority).toBe(2_000);
+  expect(additive?.[SPAWN_PRIORITY_FIELD]).toBe(1_005);
+  expect(additive).not.toHaveProperty(FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD);
+  expect(additive).not.toHaveProperty(FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD);
+});
+
+test("disabled featured lifecycle preserves an explicit low selector spawn rank", async () => {
+  const target = "offline/low-retained";
+  writeCatalog([
+    nativeEntry(),
+    { ...generatedRoutedEntry(target), priority: 1 },
+  ]);
+  const replacementConfig = config(true);
+  replacementConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  const replacementModels = (await convergeCatalog(replacementConfig)).models ?? [];
+  expect(replacementModels.find(entry => entry.slug === target)?.priority).toBe(1);
+
+  const additiveConfig = config(true, [], true);
+  additiveConfig.providers.offline = replacementConfig.providers.offline;
+  const additiveModels = (await convergeCatalog(additiveConfig)).models ?? [];
+  const additive = additiveModels.find(entry => entry.slug === target);
+  expect(additive?.priority).toBe(2_001);
+  expect(additive?.[SPAWN_PRIORITY_FIELD]).toBe(1);
+
+  const disabledConfig = config(false, [], true);
+  disabledConfig.modelPickerOrder = [target];
+  disabledConfig.providers.offline = replacementConfig.providers.offline;
+  const disabledModels = (await convergeCatalog(disabledConfig)).models ?? [];
+  const disabled = disabledModels.find(entry => entry.slug === target);
+  expect(disabled?.priority).toBe(1_000);
+  expect(disabled?.[SPAWN_PRIORITY_FIELD]).toBe(1);
+  expect(disabled?.[PICKER_DISABLED_SELECTOR_SPAWN_FIELD]).toBe(1);
+
+  const unlistedDisabledConfig = config(false, [], true);
+  unlistedDisabledConfig.providers.offline = replacementConfig.providers.offline;
+  const unlistedDisabledModels = (await convergeCatalog(unlistedDisabledConfig)).models ?? [];
+  const unlistedDisabled = unlistedDisabledModels.find(entry => entry.slug === target);
+  expect(unlistedDisabled?.priority).toBe(1);
+  expect(unlistedDisabled).not.toHaveProperty(SPAWN_PRIORITY_FIELD);
+  expect(unlistedDisabled?.[PICKER_DISABLED_SELECTOR_SPAWN_FIELD]).toBe(1);
+
+  const featuredConfig = config(false, [], true);
+  featuredConfig.subagentModels = [target];
+  featuredConfig.providers.offline = replacementConfig.providers.offline;
+  const featuredModels = (await convergeCatalog(featuredConfig)).models ?? [];
+  const featured = featuredModels.find(entry => entry.slug === target);
+  expect(featured?.[FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD]).toBe(1);
+  expect(featured?.[FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD]).toBe(1);
+
+  const demotedConfig = config(true, [], true);
+  demotedConfig.modelPickerOrder = [target];
+  demotedConfig.providers.offline = replacementConfig.providers.offline;
+  const demotedModels = (await convergeCatalog(demotedConfig)).models ?? [];
+  const demoted = demotedModels.find(entry => entry.slug === target);
+  expect(demoted?.priority).toBe(2_000);
+  expect(demoted?.[SPAWN_PRIORITY_FIELD]).toBe(1);
+  expect(demoted).not.toHaveProperty(PICKER_DISABLED_SELECTOR_SPAWN_FIELD);
+  expect(demoted).not.toHaveProperty(FEATURED_ORDINARY_NO_PICKER_SPAWN_FIELD);
+  expect(demoted).not.toHaveProperty(FEATURED_ORDINARY_SELECTOR_SPAWN_FIELD);
+});
+
+test("retained additive provider rows still emit the degraded-discovery warning", async () => {
+  writeCatalog([
+    nativeEntry(),
+    { ...generatedRoutedEntry("offline/old-live"), priority: 1 },
+  ]);
+  const nextConfig = config(true, [], true);
+  nextConfig.providers.offline = {
+    adapter: "openai-chat",
+    baseUrl: "https://offline.example.test/v1",
+    authMode: "oauth",
+    models: [],
+  };
+  saveConfig(nextConfig);
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    await syncCatalogModels(nextConfig);
+    expect(warn.mock.calls.some(args => String(args[0]).includes(
+      "provider discovery degraded; preserving 1 existing routed entry",
+    ))).toBe(true);
+  } finally {
+    warn.mockRestore();
+  }
 });
 
 function legacyCustomDeletionConfig(): OcxConfig {

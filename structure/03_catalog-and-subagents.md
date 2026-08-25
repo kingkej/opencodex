@@ -134,7 +134,9 @@ Pool mode routes across main plus added Codex credentials. Key rules:
   routing-profile selector prefixes are exact-case (`src/codex/account-namespaces.ts`,
   `src/codex/account-namespace-match.ts`, `src/routing/profile-namespace.ts`).
 - **Selector labels carry no account-role semantics.** When at least one selector is advertisable,
-  the Codex catalog clones each supported native row per selector and hides the bare picker rows;
+  the Codex catalog clones each supported native row per selector and hides the bare picker rows by
+  default. `codexAccountPickerShowPoolModels: true` keeps the ordinary Pool/Direct rows visible
+  beside the selector-qualified rows;
   bare ids remain routable and stay in raw `/v1/models` unless explicitly disabled. Missing stored
   account targets are not advertised, and private account ids never become catalog labels.
   `codexAccountPickerEnabled: false` hides generated rows without deleting exact routing bindings;

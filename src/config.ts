@@ -904,6 +904,9 @@ const configSchema = z.object({
   // A malformed hand edit must degrade to false without discarding providers, accounts,
   // or the exact selector map. Live writes remain strict.
   codexAccountPickerEnabled: z.boolean().optional().catch(false),
+  // Optional additive picker surface: keep ordinary Pool/Direct rows beside explicit account
+  // selectors. Malformed hand edits degrade to the backward-compatible replacement mode.
+  codexAccountPickerShowPoolModels: z.boolean().optional().catch(false),
   // Model ids excluded from the Grok Build managed block (dashboard switches).
   grokExcludedModels: z.array(z.string()).optional(),
   // Invalid values degrade to undefined ("auto") instead of failing the whole
@@ -1675,16 +1678,22 @@ function malformedNativeSubagentFieldWarning(field: NativeSubagentPersistedField
   return `${field} ignored: expected ${expected}`;
 }
 
-function malformedCodexAccountPickerWarning(rawParsed: unknown): string | null {
+function malformedCodexAccountPickerWarnings(rawParsed: unknown): string[] {
   const raw = rawConfigRecord(rawParsed);
-  if (!raw || !Object.hasOwn(raw, "codexAccountPickerEnabled")) return null;
-  if (typeof raw.codexAccountPickerEnabled === "boolean") return null;
-  return "codexAccountPickerEnabled ignored: expected a boolean";
+  if (!raw) return [];
+  const warnings: string[] = [];
+  for (const field of ["codexAccountPickerEnabled", "codexAccountPickerShowPoolModels"] as const) {
+    if (Object.hasOwn(raw, field) && typeof raw[field] !== "boolean") {
+      warnings.push(`${field} ignored: expected a boolean`);
+    }
+  }
+  return warnings;
 }
 
 function warnDegradedCodexAccountPicker(rawParsed: unknown): void {
-  const warning = malformedCodexAccountPickerWarning(rawParsed);
-  if (warning) console.warn(`⚠️  config.json ${warning}. Other settings were preserved.`);
+  for (const warning of malformedCodexAccountPickerWarnings(rawParsed)) {
+    console.warn(`⚠️  config.json ${warning}. Other settings were preserved.`);
+  }
 }
 
 function nativeSubagentSyncDisabledReason(config: OcxConfig, rawParsed?: unknown): string | null {
@@ -1899,8 +1908,7 @@ function validFileConfigDiagnostics(config: OcxConfig, rawParsed: unknown): Conf
     warnings.push(`claudeCode.subagentEffort ignored: expected one of ${CLAUDE_SUBAGENT_EFFORTS.join(", ")}`);
   }
   warnings.push(...malformedNativeSubagentFields(rawParsed).map(malformedNativeSubagentFieldWarning));
-  const pickerWarning = malformedCodexAccountPickerWarning(rawParsed);
-  if (pickerWarning) warnings.push(pickerWarning);
+  warnings.push(...malformedCodexAccountPickerWarnings(rawParsed));
   const hostCircuitWarning = malformedUpstreamHostCircuitThresholdWarning(rawParsed);
   if (hostCircuitWarning) warnings.push(hostCircuitWarning);
   const recoveryWarning = malformedAgentTaskRecoveryWarning(rawParsed);
@@ -2030,21 +2038,26 @@ function googleAntigravityStaticCatalogVersionError(value: unknown): string | nu
   return "schema_invalid: googleAntigravityStaticCatalogVersion: must be 1, 2, or omitted";
 }
 
-function codexAccountPickerEnabledError(value: unknown): string | null {
+function codexAccountPickerSettingsError(value: unknown): string | null {
   const raw = rawConfigRecord(value);
   if (!raw) return null;
-  const descriptor = Object.getOwnPropertyDescriptor(raw, "codexAccountPickerEnabled");
-  if (!descriptor) {
-    return "codexAccountPickerEnabled" in raw
-      ? "schema_invalid: codexAccountPickerEnabled: must be an own boolean data property or omitted"
-      : null;
+  for (const field of ["codexAccountPickerEnabled", "codexAccountPickerShowPoolModels"] as const) {
+    const descriptor = Object.getOwnPropertyDescriptor(raw, field);
+    if (!descriptor) {
+      if (field in raw) {
+        return `schema_invalid: ${field}: must be an own boolean data property or omitted`;
+      }
+      continue;
+    }
+    if (!("value" in descriptor)) {
+      return `schema_invalid: ${field}: must be an own boolean data property or omitted`;
+    }
+    const enabled = descriptor.value;
+    if (enabled !== undefined && typeof enabled !== "boolean") {
+      return `schema_invalid: ${field}: must be a boolean or omitted`;
+    }
   }
-  if (!("value" in descriptor)) {
-    return "schema_invalid: codexAccountPickerEnabled: must be an own boolean data property or omitted";
-  }
-  const enabled = descriptor.value;
-  if (enabled === undefined || typeof enabled === "boolean") return null;
-  return "schema_invalid: codexAccountPickerEnabled: must be a boolean or omitted";
+  return null;
 }
 
 function emptyCompletionRetryError(value: unknown): string | null {
@@ -2110,7 +2123,7 @@ export function validateConfigCandidate(value: unknown): { ok: true; config: Ocx
     ?? agentTaskRecoveryError(value)
     ?? googleAntigravityStaticCatalogVersionError(value)
     ?? codexAccountPrioritiesError(value)
-    ?? codexAccountPickerEnabledError(value)
+    ?? codexAccountPickerSettingsError(value)
     ?? emptyCompletionRetryError(value)
     ?? oauthOpenBrowserError(value)
     ?? loopbackListenerPortError(value);

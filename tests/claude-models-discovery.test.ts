@@ -240,6 +240,47 @@ test("exact account disables affect only the matching OpenAI and Codex discovery
   }
 });
 
+test("Codex discovery can list Pool and explicit account choices together", async () => {
+  const config = configWithStaticModels();
+  config.providers.openai = {
+    adapter: "openai-responses",
+    baseUrl: "https://chatgpt.com/backend-api/codex",
+    liveModels: false,
+  };
+  config.codexAccounts = [{
+    id: "stored-side-account",
+    email: "private@example.test",
+    alias: "Private Display Name",
+    isMain: false,
+  }];
+  config.codexAccountNamespaces = {
+    desktop: "@main",
+    team: "stored-side-account",
+  };
+  config.codexAccountPickerEnabled = true;
+  config.codexAccountPickerShowPoolModels = true;
+  saveConfig(config);
+  const server = startServer(0);
+  try {
+    const catalog = await fetch(new URL("/v1/models?client_version=1.0.0", server.url))
+      .then(response => response.json()) as {
+        models: Array<{ slug: string; visibility?: string; priority?: number }>;
+      };
+
+    expect(catalog.models.find(model => model.slug === "gpt-5.5")?.visibility).toBe("list");
+    expect(catalog.models.find(model => model.slug === "desktop/gpt-5.5")?.visibility).toBe("list");
+    expect(catalog.models.find(model => model.slug === "team/gpt-5.5")?.visibility).toBe("list");
+    const poolPriority = catalog.models.find(model => model.slug === "gpt-5.5")?.priority;
+    const explicitPriorities = ["desktop/gpt-5.5", "team/gpt-5.5"]
+      .map(slug => catalog.models.find(model => model.slug === slug)?.priority);
+    expect(typeof poolPriority).toBe("number");
+    expect(explicitPriorities.every(priority => typeof priority === "number"
+      && priority > (poolPriority as number))).toBe(true);
+  } finally {
+    await server.stop(true);
+  }
+});
+
 test("Codex discovery restores account rows for supported natives hidden on disk", async () => {
   const config = configWithStaticModels();
   config.providers.openai = {
@@ -434,6 +475,47 @@ test("Codex discovery exposes the observed native as a selector row plus one glo
     expect(anthropic.data.some(model => model.id === claudeCodeNativeAlias("team/gpt-daybreak-blue-latest"))).toBe(false);
   } finally {
     globalThis.fetch = originalFetch;
+    await server.stop(true);
+  }
+});
+
+test("additive Codex discovery keeps an account-only observation selector-qualified", async () => {
+  const config = configWithStaticModels();
+  config.providers.openai = {
+    adapter: "openai-responses",
+    baseUrl: "https://chatgpt.com/backend-api/codex",
+    liveModels: false,
+  };
+  config.codexAccountNamespaces = { team: "@main" };
+  config.codexAccountPickerEnabled = true;
+  config.codexAccountPickerShowPoolModels = true;
+  saveConfig(config);
+
+  const accountOnlySlug = "gpt-account-preview-only";
+  writeFileSync(join(isolatedCodexHome!.path, "models_cache.json"), JSON.stringify({
+    models: [{
+      slug: accountOnlySlug,
+      visibility: "hide",
+      supported_in_api: true,
+      shell_type: "shell_command",
+      comp_hash: "native-comp-hash",
+      model_messages: { instructions_template: "You are Codex." },
+      base_instructions: "You are Codex.",
+      supported_reasoning_levels: [{ effort: "medium", description: "Medium" }],
+      opencodex_account_observed_native: true,
+    }],
+  }), "utf8");
+
+  const { resetCatalogRuntimeStateForTests } = await import("../src/codex/catalog");
+  resetCatalogRuntimeStateForTests();
+  const server = startServer(0);
+  try {
+    const catalog = await fetch(new URL("/v1/models?client_version=1.0.0", server.url))
+      .then(response => response.json()) as { models: Array<{ slug: string; visibility?: string }> };
+    expect(catalog.models.find(model => model.slug === `team/${accountOnlySlug}`))
+      .toMatchObject({ visibility: "list" });
+    expect(catalog.models.some(model => model.slug === accountOnlySlug)).toBe(false);
+  } finally {
     await server.stop(true);
   }
 });

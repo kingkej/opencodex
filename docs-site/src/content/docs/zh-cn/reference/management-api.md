@@ -87,7 +87,7 @@ Authorization: Bearer <admin-token>
 | --- | --- | --- |
 | `GET /api/config` | 返回已脱敏、对管理安全的配置 DTO | — |
 | `PUT /api/config` | 禁用的完整配置替换保护 | 405；请改用聚焦端点 |
-| `GET, PUT /api/settings` | 读取运行时/启动设置，或更新自动启动、流模式、应用拥有的内存预算和 `codexAccountPickerEnabled` | 400 无效、非对象或空更新 |
+| `GET, PUT /api/settings` | 读取运行时/启动设置，或更新自动启动、流模式、应用拥有的内存预算、`codexAccountPickerEnabled` 和 `codexAccountPickerShowPoolModels` | 400 无效、非对象或空更新 |
 | `GET /api/startup-health` | 读取缓存的服务/shim 启动健康状态 | — |
 | `POST /api/startup-action` | 安装或修复服务或 Codex shim | 400 无效动作；500 动作失败 |
 | `GET, POST /api/windows-tray` | 读取 Windows 托盘状态，或安装、启动、停止、卸载它 | 400 不支持的平台/动作；500 操作失败 |
@@ -197,8 +197,10 @@ Authorization: Bearer <admin-token>
 
 ### Codex 身份验证委托
 
-`GET /api/settings` 会返回实际生效的 `codexAccountPickerEnabled` 布尔值。包含该严格布尔值的
-`PUT` 在启用空映射时会初始化保护隐私的账号 selector；禁用或再次启用时会保留已有标签。配置
+`GET /api/settings` 会返回实际生效的 `codexAccountPickerEnabled` 布尔值和已保存的
+`codexAccountPickerShowPoolModels` 偏好。后者在 picker 禁用时不会生效，但会保留，以便再次启用时
+恢复之前的显示选择。包含任一严格布尔值的 `PUT` 在启用空映射时会初始化保护隐私的账号 selector；
+禁用或再次启用时会保留已有标签。配置
 会先持久化，仅当 picker 的实际可见性发生变化时才请求一次有界 catalog convergence。成功响应
 中的 `catalogRefreshPending` 为 `false` 表示目录提交已完成（或无需刷新）；为 `true` 表示设置已
 保存，但应通过 `POST /api/sync` 重试目录刷新。持久化或 selector 分配失败时会回滚内存设置，且

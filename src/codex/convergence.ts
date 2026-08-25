@@ -305,6 +305,7 @@ function prepareCatalog(
     accountSelectors,
     suppressedBareNativeSlugs,
     disabledNativeAccountSlugs: new Set(),
+    showPoolNativeModels: config.codexAccountPickerShowPoolModels === true,
     multiAgentV2Enabled,
     openaiContextCap,
   });
@@ -321,6 +322,7 @@ function prepareCatalog(
       accountSelectors,
       suppressedBareNativeSlugs,
       disabledNativeAccountSlugs: new Set([...disabledNative].filter(slug => suppressedBareNativeSlugs.has(slug))),
+      showPoolNativeModels: config.codexAccountPickerShowPoolModels === true,
       multiAgentV2Enabled,
       keepNativeChatGptOnV1: config.keepNativeChatGptOnV1 === true,
       openaiContextCap,
@@ -355,6 +357,9 @@ function prepareCatalog(
     hasPhysicalComboProvider,
     includeNativeOpenAi,
     accountBoundEntries,
+    accountSelectorCount: accountSelectors.length,
+    showPoolNativeModels: config.codexAccountPickerShowPoolModels === true,
+    modelPickerOrder: config.modelPickerOrder,
     suppressedBareNativeSlugs,
     openaiContextCap,
     policy: {

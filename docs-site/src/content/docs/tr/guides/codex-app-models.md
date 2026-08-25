@@ -15,8 +15,9 @@ ve Direct arasında değiştirmek tek başına seçici kimliklerini değiştirme
 Bununla birlikte, hesap nitelikli seçici satırları `codexAccountPickerEnabled`
 tarafından etkinleştirildiğinde ve `codexAccountNamespaces`, eşlenen hesapları
 hala mevcut olan uygun seçicilere sahip olduğunda, opencodex eşlenen hesaplar
-için ayrı `<seçici>/<yerel-openai-modeli>` satırları ekler ve yalın yerel
-satırları Codex seçicisinden gizler. Seçici etiketleri, yerleşik bir hesap rolü
+için ayrı `<seçici>/<yerel-openai-modeli>` satırları ekler ve varsayılan olarak yalın yerel
+satırları Codex seçicisinden gizler. `codexAccountPickerShowPoolModels: true`, otomatik Pool/Direct
+satırlarını hesap nitelikli satırların yanında görünür tutar. Seçici etiketleri, yerleşik bir hesap rolü
 anlamı olmayan, kullanıcı tarafından seçilen genel adlardır. Nitelikli bir
 satırı seçmek yalnızca eşlenen hesabını kullanır, aktif Havuz hesabını
 değiştirmez ve hedef kullanılamadığında hesap değiştirmek yerine kapalı olarak
@@ -154,7 +155,7 @@ meta verileri sağladığı GPT-5.6 için kullanılır.
 | Rota | Seçici kimlikleri ve katalog meta verileri |
 | --- | --- |
 | Codex girişi (hesap nitelikli satırlar devre dışı) | `gpt-5.6-sol`, `gpt-5.6-terra` ve `gpt-5.6-luna` gibi yalın yerel kimlikler; Pool veya Direct `codexAccountMode` aracılığıyla seçilir. GPT-5.6 satırları 922.000 tokenlik bir katalog penceresi kullanır. |
-| Codex girişi (uygun seçicilerle hesap nitelikli satırlar etkin) | Uygun seçici ve desteklenen yerel model başına bir `<seçici>/<yerel-openai-modeli>` satırı; her satır yalnızca eşlenen hesabını kullanır ve yalın yerel satırlar seçiciden gizlenir. Yerel meta veriler ve bağlam pencereleri korunur. |
+| Codex girişi (uygun seçicilerle hesap nitelikli satırlar etkin) | Uygun seçici ve desteklenen yerel model başına bir `<seçici>/<yerel-openai-modeli>` satırı; her satır yalnızca eşlenen hesabını kullanır. Yalın yerel satırlar varsayılan olarak gizlenir, ancak `codexAccountPickerShowPoolModels: true` ile otomatik Pool/Direct seçenekleri olarak görünür kalır. Yerel meta veriler ve bağlam pencereleri korunur. |
 | Codex girişi (açık Daybreak iletme satırı) | Yalnızca tam `customModels` satırı kurallı `openai` sağlayıcısında yapılandırıldığında `openai/gpt-daybreak-blue-latest`. Daybreak hat kimliğini korur ve sabitlenmiş Sol yetenek anlık görüntüsünü kullanır (922.000 bağlam; 829.800 otomatik sıkıştırma). |
 | OpenAI (API anahtarı) | Tam olarak on ad alanlı satır: `gpt-5.5`, `gpt-5.6`, Sol/Terra/Luna, üç `*-pro` sanal kimliği ve iki Daybreak takma adı (onunun tümü için 922.000 bağlam; 922.000 maksimum girdi) |
 | OpenRouter | `openrouter/openai/gpt-5.6-sol`, `openrouter/openai/gpt-5.6-terra`, `openrouter/openai/gpt-5.6-luna` (922.000) |
@@ -294,5 +295,3 @@ ocx sync
 opencodex, katalog görünürlüğü, önceliği veya meta verileri her değiştiğinde
 `models_cache.json` dosyasını kasıtlı olarak eski bir önbellek sarmalayıcısıyla
 yeniden yazar, böylece bir sonraki Codex model yenilemesi yeni kataloğu okur.
-
-

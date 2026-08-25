@@ -87,7 +87,7 @@ Authorization: Bearer <admin-token>
 | --- | --- | --- |
 | `GET /api/config` |編集された、管理上安全な構成 DTO を返します。 — |
 | `PUT /api/config` |フルコンフィグ置換ガードを無効にする | 405;代わりにフォーカスされたエンドポイントを使用してください。
-| `GET, PUT /api/settings` |ランタイム/起動設定の読み取り、または自動起動、ストリーム モード、アプリ所有のメモリ バジェット、`codexAccountPickerEnabled` の更新 | 400 無効、object 以外、または空の更新 |
+| `GET, PUT /api/settings` |ランタイム/起動設定の読み取り、または自動起動、ストリーム モード、アプリ所有のメモリ バジェット、`codexAccountPickerEnabled`、`codexAccountPickerShowPoolModels` の更新 | 400 無効、object 以外、または空の更新 |
 | `GET /api/startup-health` |キャッシュされたサービス/シムの起動状態を読み取る | — |
 | `POST /api/startup-action` |サービスまたは Codex シムをインストールまたは修復する | 400 無効なアクション。 500 アクション失敗 |
 | `GET, POST /api/windows-tray` | Windows トレイの状態を読み取るか、インストール/起動/停止/アンインストールする | 400 のサポートされていないプラットフォーム/アクション。 500 操作失敗 |
@@ -197,7 +197,9 @@ Authorization: Bearer <admin-token>
 
 ### Codex認証の委任
 
-`GET /api/settings` は有効な `codexAccountPickerEnabled` boolean を返します。この strict boolean を
+`GET /api/settings` は有効な `codexAccountPickerEnabled` boolean と、保存済みの
+`codexAccountPickerShowPoolModels` 設定を返します。後者は picker が無効な間は作用しませんが、
+再有効化時に以前の表示選択を復元できるよう保存されます。いずれかの strict boolean を
 `PUT` すると、空の map を有効化する場合は privacy-safe selector を初期化し、既存 label を保持したまま
 先に永続化し、有効な picker 表示が変わったときだけ bounded catalog convergence を 1 回要求します。
 成功応答の `catalogRefreshPending: true` は設定は保存済みだが `POST /api/sync` による再試行が必要という意味です。

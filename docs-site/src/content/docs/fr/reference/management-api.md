@@ -102,7 +102,7 @@ Voir [Combos](/fr/guides/combos/) pour les stratégies cibles, les temps de rech
 | --- | --- | --- |
 | `GET /api/config` | Renvoyer l'objet de transfert de configuration expurgé et sécurisé pour la gestion | — |
 | `PUT /api/config` | Toujours refusé : le remplacement intégral de la configuration est désactivé | 405 ; utiliser les points de terminaison ciblés, notamment `POST /api/providers` pour les fournisseurs |
-| `GET, PUT /api/settings` | Lire les paramètres d'exécution et de démarrage, ou mettre à jour le démarrage automatique, le mode de diffusion, le budget mémoire propre à l'application et `codexAccountPickerEnabled` | 400 mise à jour invalide, vide ou qui n'est pas un objet |
+| `GET, PUT /api/settings` | Lire les paramètres d'exécution et de démarrage, ou mettre à jour le démarrage automatique, le mode de diffusion, le budget mémoire propre à l'application, `codexAccountPickerEnabled` et `codexAccountPickerShowPoolModels` | 400 mise à jour invalide, vide ou qui n'est pas un objet |
 | `GET /api/startup-health` | Lire l'état de santé du service et du lanceur intermédiaire, mis en cache au démarrage | — |
 | `POST /api/startup-action` | Installer ou réparer le service ou le lanceur intermédiaire Codex | 400 action invalide ; 500 échec de l'action |
 | `GET, POST /api/windows-tray` | Lire l'état de l'icône de notification Windows, ou l'installer, la démarrer, l'arrêter ou la désinstaller | 400 plateforme ou action non prise en charge ; 500 échec de l'opération |
@@ -227,7 +227,10 @@ lui-même s'il souhaite ajouter une étoile au dépôt.
 
 ### Délégation de l'authentification Codex
 
-`GET /api/settings` indique la valeur effective du booléen `codexAccountPickerEnabled`. Un `PUT` contenant
+`GET /api/settings` indique la valeur effective du booléen `codexAccountPickerEnabled` et la préférence
+stockée `codexAccountPickerShowPoolModels`. Cette dernière reste sans effet lorsque le sélecteur est
+désactivé, mais elle est conservée afin de restaurer le choix de présentation lors de sa réactivation.
+Un `PUT` contenant
 strictement ce booléen initialise des sélecteurs de compte respectueux de la confidentialité lorsqu'une table vide est activée, préserve
 les libellés de sélection existants lors d'une désactivation ou d'une réactivation, enregistre d'abord les changements, puis demande une
 convergence limitée du catalogue uniquement si la visibilité effective du sélecteur a changé. La réponse en cas de réussite comprend

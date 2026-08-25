@@ -1976,19 +1976,25 @@ describe("opencodex config defaults", () => {
 
   test("persists the optional picker override without adding it to defaults", () => {
     for (const enabled of [true, false]) {
-      writeAccountNamespaceConfig({ desktop: "@main" }, { codexAccountPickerEnabled: enabled });
+      writeAccountNamespaceConfig({ desktop: "@main" }, {
+        codexAccountPickerEnabled: enabled,
+        codexAccountPickerShowPoolModels: enabled,
+      });
 
       const diagnostics = readConfigDiagnostics();
       expect(diagnostics.error).toBeNull();
       expect(diagnostics.config.codexAccountPickerEnabled).toBe(enabled);
+      expect(diagnostics.config.codexAccountPickerShowPoolModels).toBe(enabled);
     }
 
     expect(Object.hasOwn(getDefaultConfig(), "codexAccountPickerEnabled")).toBe(false);
+    expect(Object.hasOwn(getDefaultConfig(), "codexAccountPickerShowPoolModels")).toBe(false);
   });
 
   test("malformed persisted picker visibility fails closed without discarding accounts or providers", () => {
     writeAccountNamespaceConfig({ desktop: "@main", side: "stored-account" }, {
       codexAccountPickerEnabled: "yes",
+      codexAccountPickerShowPoolModels: "yes",
       codexAccounts: [
         { id: "main", email: "main@example.test", isMain: true },
         { id: "stored-account", email: "side@example.test", isMain: false },
@@ -2008,10 +2014,14 @@ describe("opencodex config defaults", () => {
         ],
         codexAccountNamespaces: { desktop: "@main", side: "stored-account" },
         codexAccountPickerEnabled: false,
+        codexAccountPickerShowPoolModels: false,
       },
     });
     expect(diagnostics.warnings).toContain(
       "codexAccountPickerEnabled ignored: expected a boolean",
+    );
+    expect(diagnostics.warnings).toContain(
+      "codexAccountPickerShowPoolModels ignored: expected a boolean",
     );
     expect(backupNames()).toEqual([]);
 
@@ -2027,14 +2037,16 @@ describe("opencodex config defaults", () => {
       warnSpy.mockRestore();
     }
 
-    for (const invalid of [null, "false", 1]) {
-      expect(validateConfigCandidate({
-        ...getDefaultConfig(),
-        codexAccountPickerEnabled: invalid,
-      })).toMatchObject({
-        ok: false,
-        error: expect.stringContaining("codexAccountPickerEnabled"),
-      });
+    for (const field of ["codexAccountPickerEnabled", "codexAccountPickerShowPoolModels"] as const) {
+      for (const invalid of [null, "false", 1]) {
+        expect(validateConfigCandidate({
+          ...getDefaultConfig(),
+          [field]: invalid,
+        })).toMatchObject({
+          ok: false,
+          error: expect.stringContaining(field),
+        });
+      }
     }
 
     const inherited = Object.assign(
