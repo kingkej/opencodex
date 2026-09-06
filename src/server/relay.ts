@@ -147,6 +147,48 @@ export function failedTailFrame(encoder: TextEncoder, err: unknown): Uint8Array 
   return encoder.encode(`\n\nevent: response.failed\ndata: ${payload}\n\n${DONE_SSE_FRAME_TEXT}`);
 }
 
+/** `incomplete_details.reason` for a passthrough body that ended without a protocol terminal. */
+export const UPSTREAM_EOF_INCOMPLETE_REASON = "upstream_eof";
+
+/**
+ * Terminal frame for a CLEAN upstream EOF that never carried a Responses terminal event.
+ * Without it the client just sees the body stop, which Codex reports as
+ * `ApiError::Stream("stream closed before response.completed")` with nothing to explain it.
+ * Clean EOF is `incomplete`, not `failed`, on purpose: a mid-stream reset is the failed tail
+ * above, and the inspection side already classifies the two that way (`onCleanEof` reports
+ * "incomplete", `onReadError` reports "failed"/502).
+ */
+export function buildIncompleteTailPayload(reason: string = UPSTREAM_EOF_INCOMPLETE_REASON): string {
+  return JSON.stringify({
+    type: "response.incomplete",
+    response: { status: "incomplete", incomplete_details: { reason } },
+  });
+}
+
+/** SSE bytes for the synthetic clean-EOF terminal, including the conventional sentinel. */
+export function incompleteTailFrame(reason?: string): string {
+  // Leading blank line terminates a partial SSE block so the synthetic frame parses cleanly.
+  return `\n\nevent: response.incomplete\ndata: ${buildIncompleteTailPayload(reason)}\n\ndata: [DONE]\n\n`;
+}
+
+/**
+ * Whether the EOF-flushed tail already carries a Responses terminal. The output boundary only
+ * marks `terminalSeen()` for frames closed by a blank line, so an upstream that ends its body
+ * immediately after the terminal block still needs that block honored — appending a synthetic
+ * terminal ahead of it would contradict a real `response.completed`.
+ */
+export function sseTailCarriesResponsesTerminal(tail: Uint8Array): boolean {
+  if (tail.byteLength === 0) return false;
+  let rest = new TextDecoder().decode(tail);
+  for (;;) {
+    const next = nextSseBlock(rest);
+    const payload = sseDataPayload(next ? next.block : rest);
+    if (payload && payload !== "[DONE]" && terminalStatusFromSsePayload(payload)) return true;
+    if (!next) return false;
+    rest = next.rest;
+  }
+}
+
 export type SseTerminalOutputBoundary = {
   feed(chunk: Uint8Array): Uint8Array;
   finish(): Uint8Array;
@@ -235,7 +277,11 @@ export function createSseTerminalOutputBoundary(): SseTerminalOutputBoundary {
       // dispatchable event rather than an unterminated tail.
       const tailText = decoder.decode(tail);
       const delimiter = encoder.encode(tailText.includes("\r\n") ? "\r\n\r\n" : "\n\n");
-      return processFrames([{ block: tail, delimiter }]);
+      const output = processFrames([{ block: tail, delimiter }]);
+      if (terminal) return output;
+      return output.byteLength >= delimiter.byteLength
+        ? output.slice(0, output.byteLength - delimiter.byteLength)
+        : output;
     },
     terminalSeen: () => terminal,
     doneSeen: () => done,
@@ -300,17 +346,22 @@ export function relaySseWithFailedTail(
           if (done) {
             const tail = terminalBoundary.finish();
             if (tail.byteLength > 0) controller.enqueue(tail);
-            if (terminalBoundary.terminalSeen()) {
-              if (!terminalBoundary.doneSeen()) controller.enqueue(doneFrame(encoder));
-            } else {
-              // A clean upstream EOF is still a failed Responses turn when no
-              // protocol terminal arrived. Make that state explicit so Codex
-              // does not treat HTTP 200 + bare EOF as a retryable disconnect.
-              const incomplete = adapterEofIncompleteFrame(encoder);
-              controller.enqueue(incomplete);
-              controller.enqueue(doneFrame(encoder));
-            }
+            // A body that just ends carries no terminal for the client to parse. Close the turn
+            // with a synthetic `response.incomplete` instead of a truncated stream (#110 RC1 for
+            // the passthrough relay; the bridge already synthesizes its own EOF terminal).
+            // `finish()` only ever returns a delimiter-less block, and SSE parsers discard an
+            // unterminated event at EOF — so a tail that already carries the terminal is closed
+            // off rather than contradicted by a second one.
+            const tailTerminal = terminalBoundary.terminalSeen();
+            const tailDone = terminalBoundary.doneSeen();
             terminalBoundary.dispose();
+            try {
+              if (tailTerminal) {
+                if (!tailDone) controller.enqueue(doneFrame(encoder));
+              } else {
+                controller.enqueue(encoder.encode(incompleteTailFrame()));
+              }
+            } catch { /* client already torn down */ }
             controller.close();
             return;
           }
@@ -328,12 +379,13 @@ export function relaySseWithFailedTail(
           // Preserve the original read/framing failure and continue emitting
           // the bounded failed tail instead of letting cleanup throw again.
         }
+        const tailDone = terminalBoundary.doneSeen();
         terminalBoundary.dispose();
         if (closed) return;
         try {
           if (partial.byteLength > 0) controller.enqueue(partial);
           if (tailTerminal) {
-            if (!terminalBoundary.doneSeen()) controller.enqueue(doneFrame(encoder));
+            if (!tailDone) controller.enqueue(doneFrame(encoder));
           } else {
             // Leading blank line terminates a partial SSE block so the failed frame parses cleanly.
             controller.enqueue(failedTailFrame(encoder, err));

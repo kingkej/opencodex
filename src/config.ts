@@ -7,6 +7,8 @@ import { isValidProviderName, hasOwnProvider } from "./config/provider-name";
 import {
   apiKeyTransportConfigError,
   booleanRecordConfigError,
+  codexResponsesCompactionConfigError,
+  codexTurnMetadataPassthroughConfigError,
   modelAdapterRecordConfigError,
   modelDisplayNamesConfigError,
   nonBlankStringArrayConfigError,
@@ -536,6 +538,8 @@ const providerConfigSchema = z.object({
   supportsServiceTier: z.boolean().optional(),
   modelSupportsServiceTier: z.record(z.string().min(1), z.boolean()).optional(),
   preserveResponsesReasoningContent: z.boolean().optional(),
+  supportsCodexResponsesCompaction: z.boolean().optional(),
+  requiresCodexTurnMetadataPassthrough: z.boolean().optional(),
   decodesNativeCompactionBlobs: z.boolean().optional(),
   allowPrivateNetwork: z.boolean().optional(),
   // The management API accepts `null` as "clear this", so a config written before the POST
@@ -580,6 +584,8 @@ export { isValidProviderName, hasOwnProvider } from "./config/provider-name";
 export {
   apiKeyTransportConfigError,
   booleanRecordConfigError,
+  codexResponsesCompactionConfigError,
+  codexTurnMetadataPassthroughConfigError,
   modelAdapterRecordConfigError,
   modelDisplayNamesConfigError,
   nonBlankStringArrayConfigError,
@@ -1219,6 +1225,22 @@ const configSchema = z.object({
             : "vercelGatewayRouting",
         ],
         message: vercelRoutingError,
+      });
+    }
+    const codexCompactionError = codexResponsesCompactionConfigError(provider);
+    if (codexCompactionError) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["providers", redactSecretString(name), "supportsCodexResponsesCompaction"],
+        message: codexCompactionError,
+      });
+    }
+    const codexTurnMetadataError = codexTurnMetadataPassthroughConfigError(provider);
+    if (codexTurnMetadataError) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["providers", redactSecretString(name), "requiresCodexTurnMetadataPassthrough"],
+        message: codexTurnMetadataError,
       });
     }
     if (Object.hasOwn(provider, "virtualModels")) {

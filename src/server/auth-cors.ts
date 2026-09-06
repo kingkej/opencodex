@@ -12,6 +12,8 @@ import {
 import {
   apiKeyTransportConfigError,
   booleanRecordConfigError,
+  codexResponsesCompactionConfigError,
+  codexTurnMetadataPassthroughConfigError,
   modelAdapterRecordConfigError,
   nonBlankStringArrayConfigError,
   positiveIntegerConfigError,
@@ -654,6 +656,10 @@ export function providerManagementConfigError(name: unknown, provider: unknown):
   }
   const apiKeyTransportError = apiKeyTransportConfigError(typed);
   if (apiKeyTransportError) return `provider ${name} ${apiKeyTransportError}`;
+  const codexCompactionError = codexResponsesCompactionConfigError(typed);
+  if (codexCompactionError) return `provider ${name} ${codexCompactionError}`;
+  const codexTurnMetadataError = codexTurnMetadataPassthroughConfigError(typed);
+  if (codexTurnMetadataError) return `provider ${name} ${codexTurnMetadataError}`;
   const maxInputError = positiveIntegerRecordConfigError(raw.modelMaxInputTokens, "modelMaxInputTokens");
   if (maxInputError) return `provider ${name} ${maxInputError}`;
   const autoCompactError = modelAutoCompactTokenLimitsConfigError(
@@ -831,6 +837,8 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   supportsOpenAiWebSearchToolFields: "editor",
   xaiResponsesXSearch: "editor",
   supportsResponsesCustomTools: "editor",
+  supportsCodexResponsesCompaction: "editor",
+  requiresCodexTurnMetadataPassthrough: "editor",
   responsesSnapshotRepair: "editor",
   reasoningEffortMap: "editor",
   modelReasoningEffortMap: "editor",
@@ -1001,6 +1009,55 @@ export function safeConfigDTO(config: OcxConfig): unknown {
     if (name === "xai") {
       dto.xaiResponsesOptInState = xaiResponsesOptInState(provider);
     }
+    for (const key of [
+      "defaultModel",
+      "disabled",
+      "allowPrivateNetwork",
+      "supportsCodexResponsesCompaction",
+      "requiresCodexTurnMetadataPassthrough",
+      "authMode",
+      "apiKeyTransport",
+      "keyOptional",
+      "freeTier",
+      "liveModels",
+      "requestPacing",
+      "models",
+      "contextWindow",
+      "modelContextWindows",
+      "modelAutoCompactTokenLimits",
+      "defaultMaxOutputTokens",
+      "modelMaxOutputTokens",
+      "openRouterRouting",
+      "modelOpenRouterRouting",
+      "reasoningEfforts",
+      "modelReasoningEfforts",
+      "reasoningWireFormat",
+      "noVisionModels",
+      "noReasoningModels",
+      "noTemperatureModels",
+      "noTopPModels",
+      "noPenaltyModels",
+      "noStructuredOutputModels",
+      "upstreamHttpVersion",
+      "autoToolChoiceOnlyModels",
+      "preserveReasoningContentModels",
+      "requiresReasoningPlaceholderModels",
+      "escapeBuiltinToolNames",
+    ] as const) {
+      copyIfDefined(dto, provider, key);
+    }
+    const modelCosts = sanitizeModelCostsForDisplay(provider.modelCosts);
+    if (modelCosts) dto.modelCosts = modelCosts;
+    // Resolve the note by DESTINATION, not by name. A preset saved under a custom name is
+    // still pointed at the same vendor route, and a usage restriction the user needs to see
+    // must not disappear because the row was renamed. Prefer the same-name entry so an
+    // unrenamed provider keeps its exact registry note.
+    const registryNote = (providerMatchesRegistryTransport(name, provider)
+      ? getProviderRegistryEntry(name)
+      : registryEntryForProviderDestination(provider))?.note;
+    if (typeof registryNote === "string" && registryNote.trim()) dto.note = registryNote;
+    const codexAccountMode = providerCodexAccountMode(name, provider);
+    if (codexAccountMode) dto.codexAccountMode = codexAccountMode;
     providers[name] = dto;
   }
   return {

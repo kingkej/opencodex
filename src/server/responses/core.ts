@@ -200,7 +200,11 @@ import {
 import type { DataPlaneAdmission } from "../auth-cors";
 import { createTranslatorBudget, isTranslatorBudgetExceededError, type TranslatorBudget } from "../../lib/translator-budget";
 import { listOpenAiForwardSidecarCandidates, resolveFirstUsableOpenAiSidecar, type ResolvedOpenAiForwardSidecar } from "../../providers/openai-sidecar";
-import { isCanonicalOpenAiForwardProvider, OPENAI_CODEX_PROVIDER_ID } from "../../providers/openai-tiers";
+import {
+  isCanonicalOpenAiForwardProvider,
+  OPENAI_CODEX_PROVIDER_ID,
+  providerSupportsCodexResponsesCompaction,
+} from "../../providers/openai-tiers";
 import { providerContextCap } from "../../providers/context-cap";
 import {
   fastPolicyForModel,
@@ -3661,11 +3665,12 @@ async function handleResponsesInner(
   // natively upstream; here we run the routed model as a plain summarizer — no tools, no web-search
   // sidecar — and the bridge appends the synthetic compaction item (src/responses/compaction.ts).
   // A Responses-shaped wire does not imply support for Codex's private
-  // `compaction_trigger` item — only the canonical ChatGPT backend speaks that
-  // contract. An API-key gateway would receive the trigger, answer with an ordinary
-  // message, and leave Codex fataling on a missing compaction item (#422).
+  // `compaction_trigger` item. The canonical ChatGPT backend and explicitly capable
+  // sidecars speak that contract; every other gateway is driven as a summarizer.
+  // Without this gate, an ordinary message would leave Codex fataling on a missing
+  // compaction item (#422).
   const routedCompaction = parsed._compactionRequest === true
-    && !isCanonicalOpenAiForwardProvider(route.provider);
+    && !providerSupportsCodexResponsesCompaction(route.provider);
   const commitReasoningReplayServingRoute = (): void => {
     commitReasoningReplayServingIdentity(parsed._reasoningReplayScope);
   };

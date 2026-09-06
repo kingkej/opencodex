@@ -1,8 +1,8 @@
 /**
  * Issue #422: a Responses-shaped wire does not imply support for Codex's private
- * `compaction_trigger` item. Only the canonical ChatGPT backend speaks that
- * contract; every other gateway has to be driven as a plain summarizer, or Codex
- * fatals on a compaction turn that came back as an ordinary message.
+ * `compaction_trigger` item. The canonical ChatGPT backend and explicitly capable
+ * sidecars speak that contract; every other gateway has to be driven as a plain
+ * summarizer, or Codex fatals on a compaction turn that came back as an ordinary message.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -607,6 +607,41 @@ describe("native Codex pool compaction", () => {
 });
 
 describe("routed compaction for key-mode openai-responses (#422)", () => {
+  test("an explicitly capable sidecar receives and returns the native Codex compaction contract", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const nativeCompaction = {
+      type: "compaction",
+      id: "cmp_sidecar",
+      encrypted_content: "ocx1:sidecar-checkpoint",
+    };
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return jsonResponse({
+        id: "resp_sidecar_compaction",
+        status: "completed",
+        output: [nativeCompaction],
+        usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+      });
+    }) as typeof fetch;
+
+    const res = await handleResponses(
+      compactionRequest(baseCompactionBody()),
+      keyProviderConfig({ supportsCodexResponsesCompaction: true }),
+      { model: "", provider: "" },
+    );
+
+    expect(bodies.length).toBe(1);
+    const sent = bodies[0]!;
+    const input = sent.input as Array<Record<string, unknown>>;
+    expect(input.some(item => item.type === "compaction_trigger")).toBe(true);
+    expect(sent.tools).toBeDefined();
+    expect(sent.tool_choice).toBe("auto");
+    expect(JSON.stringify(input)).not.toContain("CONTEXT CHECKPOINT COMPACTION");
+
+    const json = await res.json() as { output?: Array<Record<string, unknown>> };
+    expect(json.output).toEqual([nativeCompaction]);
+  });
+
   test("rewrites the wire: no trigger, no tools, summarizer prompt present", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {

@@ -197,6 +197,56 @@ describe("relaySseWithFailedTail", () => {
     }
   });
 
+  test("clean EOF with no terminal event appends a synthetic response.incomplete", async () => {
+    const upstream = new AbortController();
+    const src = sourceStream(['data: {"type":"response.output_text.delta","delta":"hi"}\n\n']);
+    const out = await drain(relaySseWithFailedTail(src, upstream));
+    // Codex reports a body that just stops as "stream closed before response.completed";
+    // the relay must close the turn with a parseable terminal instead.
+    expect(out.startsWith('data: {"type":"response.output_text.delta","delta":"hi"}\n\n')).toBe(true);
+    expect(out).toContain("\n\nevent: response.incomplete\ndata: ");
+    expect(out.endsWith("data: [DONE]\n\n")).toBe(true);
+    const dataLine = out.split("event: response.incomplete\ndata: ")[1]!.split("\n")[0]!;
+    const parsed = JSON.parse(dataLine) as {
+      type: string;
+      response: { status: string; incomplete_details: { reason: string } };
+    };
+    expect(parsed.type).toBe("response.incomplete");
+    expect(parsed.response.status).toBe("incomplete");
+    expect(parsed.response.incomplete_details.reason).toBe("upstream_eof");
+    // Clean EOF is not a transport reset: nothing to abort.
+    expect(upstream.signal.aborted).toBe(false);
+  });
+
+  test("EOF right after an unterminated terminal block is not double-terminated", async () => {
+    const upstream = new AbortController();
+    // Last block never gets its blank-line delimiter, so the output boundary flushes it at EOF
+    // without having parsed it. The flushed terminal still wins.
+    const src = sourceStream(['event: response.completed\ndata: {"type":"response.completed"}']);
+    const out = await drain(relaySseWithFailedTail(src, upstream));
+    // The real terminal is closed off (an unterminated event is discarded by SSE parsers)
+    // and never contradicted by a synthetic one.
+    expect(out).toBe('event: response.completed\ndata: {"type":"response.completed"}\n\ndata: [DONE]\n\n');
+    expect(out).not.toContain("response.incomplete");
+  });
+
+  test("legacy and eager clean-EOF terminals are byte-identical", async () => {
+    const chunks = ['data: {"type":"response.output_text.delta","delta":"hi"}\n\n'];
+    const legacy = await drain(relaySseWithFailedTail(sourceStream(chunks), new AbortController()));
+    const eager = await drain(relaySseEagerBounded(sourceStream(chunks), new AbortController(), parityHooks));
+    expect(encoder.encode(eager)).toEqual(encoder.encode(legacy));
+    expect(legacy).toContain("event: response.incomplete");
+  });
+
+  test("legacy and eager close an unterminated terminal tail identically", async () => {
+    const chunks = ['event: response.completed\ndata: {"type":"response.completed"}'];
+    const legacy = await drain(relaySseWithFailedTail(sourceStream(chunks), new AbortController()));
+    const eager = await drain(relaySseEagerBounded(sourceStream(chunks), new AbortController(), parityHooks));
+    expect(encoder.encode(eager)).toEqual(encoder.encode(legacy));
+    expect(legacy.endsWith("\n\n")).toBe(true);
+    expect(legacy).not.toContain("response.incomplete");
+  });
+
   test("(090-10) legacy and eager failed tails are byte-identical before and after message truncation", async () => {
     for (const message of ["in-cap reset", `${"x".repeat(4_096)}-uncapped-suffix`]) {
       const error = new Error(message);
@@ -292,18 +342,18 @@ describe("relaySseWithFailedTail", () => {
       expect(doneEvents(text)).toHaveLength(1);
       if (expected === "incomplete") {
         expect(terminalEvents(text)).toEqual(["response.incomplete"]);
-        expect(text).toContain('"reason":"adapter_eof"');
+        expect(text).toContain('"reason":"upstream_eof"');
       } else if (expected === "completed") {
         expect(terminalEvents(text)).toEqual(["response.completed"]);
       } else if (expected === "policy-failed") {
         expect(terminalEvents(text)).toEqual(["response.failed"]);
         expect(text).toContain('"code":"cyber_policy"');
-        expect(text).not.toContain('"reason":"adapter_eof"');
+        expect(text).not.toContain('"reason":"upstream_eof"');
       } else {
         expect(terminalEvents(text)).toEqual(["response.incomplete"]);
         expect(text).not.toContain("event: response.completed");
         expect(text).toContain('data: {"type":"response.completed","response":{"status":"completed"}');
-        expect(text).toContain('"reason":"adapter_eof"');
+        expect(text).toContain('"reason":"upstream_eof"');
       }
     }
   });

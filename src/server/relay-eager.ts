@@ -25,10 +25,11 @@
  */
 
 import {
-  adapterEofIncompleteFrame,
   createSseTerminalOutputBoundary,
   doneFrame,
   failedTailFrame,
+  incompleteTailFrame,
+  sseTailCarriesResponsesTerminal,
 } from "./relay";
 import {
   nextSseBlock,
@@ -106,7 +107,6 @@ export function relaySseEagerBounded(
 
   const reader = body.getReader();
   const terminalEncoder = new TextEncoder();
-  const adapterEofFrame = adapterEofIncompleteFrame(terminalEncoder);
   const terminalSentinel = doneFrame(terminalEncoder);
   const terminalBoundary = createSseTerminalOutputBoundary();
   const activeRewrite: SseBlockRewrite | undefined = hooks.rewriteBlocks
@@ -274,20 +274,18 @@ export function relaySseEagerBounded(
             queuedBytes += clientTail.byteLength;
             try { controllerRef?.enqueue(clientTail); } catch { /* client already gone */ }
           }
+          const enqueueTail = (bytes: Uint8Array): void => {
+            queuedBytes += bytes.byteLength;
+            try { controllerRef?.enqueue(bytes); } catch { /* client already gone */ }
+          };
           if (terminalBoundary.terminalSeen()) {
-            if (!terminalBoundary.doneSeen() && !cancelled) {
-              queuedBytes += terminalSentinel.byteLength;
-              try { controllerRef?.enqueue(terminalSentinel); } catch { /* client already gone */ }
-            }
+            if (!terminalBoundary.doneSeen() && !cancelled) enqueueTail(terminalSentinel);
           } else if (!hooks.sawTerminal() && !cancelled && !upstream.signal.aborted) {
-            // A clean 200 EOF without a Responses terminal must be visible to
-            // Codex as one incomplete turn, followed by the normal sentinel.
-            queuedBytes += adapterEofFrame.byteLength + terminalSentinel.byteLength;
-            try {
-              controllerRef?.enqueue(adapterEofFrame);
-              controllerRef?.enqueue(terminalSentinel);
-            } catch { /* client already gone */ }
             syntheticKind = "incomplete";
+            // Accounting alone is not enough: a client handed a body that simply stops has no
+            // terminal to parse (Codex: "stream closed before response.completed"). Emit the
+            // same synthetic terminal the tee relay does.
+            enqueueTail(new TextEncoder().encode(incompleteTailFrame()));
           }
           break;
         }

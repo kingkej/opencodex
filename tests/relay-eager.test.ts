@@ -6,9 +6,9 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
-  adapterEofIncompleteFrame,
   createSseInspector,
   doneFrame,
+  incompleteTailFrame,
   MAX_TAIL_ERROR_MESSAGE_CHARS,
 } from "../src/server/relay";
 import { relaySseEagerBounded, type EagerRelayHooks } from "../src/server/relay-eager";
@@ -274,9 +274,9 @@ describe("relaySseEagerBounded — inline payload rewrite (#864)", () => {
     up.close();
 
     const text = await reading;
+    // The clean-EOF terminal follows the flushed tail (relay.ts incompleteTailFrame()).
     expect(text.startsWith("data: �")).toBe(true);
-    expect(text).toContain('"reason":"adapter_eof"');
-    expect(countOccurrences(text, "data: [DONE]")).toBe(1);
+    expect(text.slice("data: �".length)).toBe(incompleteTailFrame());
   });
 
   test("terminal framing keeps partial blocks out of the rewrite budget", async () => {
@@ -400,7 +400,7 @@ describe("relaySseEagerBounded — side-effect parity", () => {
     expect(rec.dones).toBe(1);
   });
 
-  test("clean EOF emits one adapter_eof incomplete terminal and one DONE", async () => {
+  test("clean EOF emits one upstream_eof incomplete terminal and one DONE", async () => {
     const { hooks, rec } = makeHooks();
     const up = controlledUpstream();
     const relayed = relaySseEagerBounded(up.stream, new AbortController(), hooks);
@@ -409,7 +409,7 @@ describe("relaySseEagerBounded — side-effect parity", () => {
 
     const text = await readAll(relayed);
     expect(text.match(/event: response\.incomplete/g)?.length).toBe(1);
-    expect(text).toContain('"reason":"adapter_eof"');
+    expect(text).toContain('"reason":"upstream_eof"');
     expect(countOccurrences(text, "data: [DONE]")).toBe(1);
     expect(rec.synthetics).toEqual(["incomplete"]);
     expect(rec.terminals).toEqual([]);
@@ -1058,14 +1058,8 @@ describe("relaySseEagerBounded — bounded queue", () => {
       if (done) break;
       total += value.byteLength;
     }
-    // The unterminated client block is made dispatchable with one blank-line
-    // delimiter, then clean EOF adds exactly one adapter_eof terminal and DONE.
-    expect(total).toBe(
-      3 * chunk.byteLength
-        + enc.encode("\n\n").byteLength
-        + adapterEofIncompleteFrame(enc).byteLength
-        + doneFrame(enc).byteLength,
-    );
+    // 3 * 12 relayed bytes plus the synthetic clean-EOF terminal (no upstream terminal here).
+    expect(total).toBe(3 * chunk.byteLength + enc.encode(incompleteTailFrame()).byteLength);
   });
 
   test("(b2) pause resolver rechecks an abort that wins before installation", async () => {

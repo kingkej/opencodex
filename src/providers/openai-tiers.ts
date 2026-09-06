@@ -37,6 +37,31 @@ export function isCanonicalOpenAiForwardProvider(provider: OcxProviderConfig): b
     && normalizedBaseUrl(provider.baseUrl) === CODEX_FORWARD_BASE_URL;
 }
 
+/**
+ * Whether this Responses destination implements Codex's private remote-compaction v2 contract.
+ *
+ * A generic Responses wire is not enough: ordinary gateways must keep the routed summarizer
+ * fallback. Noncanonical sidecars may opt in explicitly when they accept `compaction_trigger`
+ * and return exactly one native `compaction` output item.
+ */
+export function providerSupportsCodexResponsesCompaction(provider: OcxProviderConfig): boolean {
+  return provider.adapter === "openai-responses"
+    && (isCanonicalOpenAiForwardProvider(provider)
+      || provider.supportsCodexResponsesCompaction === true);
+}
+
+/**
+ * Whether this Responses destination needs Codex's private item metadata left on `input[*]`.
+ *
+ * The canonical ChatGPT backend always receives it. A noncanonical sidecar that reconstructs a
+ * native Codex turn — the ChatGPT web bridge keys its `<environment_context>` lookup on the turn
+ * id — opts in explicitly; every other gateway keeps the default strip of the unknown parameter.
+ */
+export function providerRequiresCodexTurnMetadataPassthrough(provider: OcxProviderConfig): boolean {
+  return provider.adapter === "openai-responses"
+    && provider.requiresCodexTurnMetadataPassthrough === true;
+}
+
 const OPENAI_API_ORIGIN = "https://api.openai.com";
 const OPENAI_API_BASE_URL = `${OPENAI_API_ORIGIN}/v1`;
 const OPENAI_API_RESPONSES_URL = `${OPENAI_API_BASE_URL}/responses`;

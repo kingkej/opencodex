@@ -27,6 +27,34 @@ const REASONING_SUMMARY_DELIVERY_SET = new Set<string>(REASONING_SUMMARY_DELIVER
 const DISPLAY_NAME_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const MAX_MODEL_DISPLAY_NAME_LENGTH = 128;
 
+/** Validate the explicit Codex-private Responses compaction capability. */
+export function codexResponsesCompactionConfigError(
+  provider: Pick<OcxProviderConfig, "adapter" | "supportsCodexResponsesCompaction">,
+): string | null {
+  const capability = provider.supportsCodexResponsesCompaction;
+  if (capability !== undefined && typeof capability !== "boolean") {
+    return "supportsCodexResponsesCompaction must be a boolean";
+  }
+  if (capability === true && provider.adapter !== "openai-responses") {
+    return "supportsCodexResponsesCompaction requires adapter openai-responses";
+  }
+  return null;
+}
+
+/** Validate the explicit Codex-private item-metadata passthrough capability. */
+export function codexTurnMetadataPassthroughConfigError(
+  provider: Pick<OcxProviderConfig, "adapter" | "requiresCodexTurnMetadataPassthrough">,
+): string | null {
+  const capability = provider.requiresCodexTurnMetadataPassthrough;
+  if (capability !== undefined && typeof capability !== "boolean") {
+    return "requiresCodexTurnMetadataPassthrough must be a boolean";
+  }
+  if (capability === true && provider.adapter !== "openai-responses") {
+    return "requiresCodexTurnMetadataPassthrough requires adapter openai-responses";
+  }
+  return null;
+}
+
 /** Validate a provider destination without coupling DTO callers to config persistence. */
 export function providerBaseUrlConfigError(baseUrl: string): string | null {
   try {

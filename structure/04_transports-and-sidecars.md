@@ -221,6 +221,27 @@ alone never opt a gateway in.
 and before the `/v1/*` guard. Unknown `/v1/*` paths return JSON 404 errors instead of falling through
 to GUI static serving.
 
+Remote compaction v2 arrives on `/v1/responses` as Codex's private `compaction_trigger` item. The
+canonical ChatGPT forward destination receives that contract natively. A noncanonical
+`openai-responses` provider receives it natively only with the explicit
+`supportsCodexResponsesCompaction: true` capability; the upstream must return exactly one
+`compaction` output item. Every other routed provider keeps the plain-summarizer fallback that
+removes the trigger and tools, because a generic Responses wire does not prove support for this
+private contract. The server gate and adapter body rewrite share
+`providerSupportsCodexResponsesCompaction`; they must not drift. This explicit capability is
+separate from `/responses/compact` endpoint support and from decoding replayed native compaction
+blobs.
+
+A sidecar that rebuilds a native Codex turn also needs Codex's private
+`internal_chat_message_metadata_passthrough` item metadata, which the adapter otherwise strips at
+the noncanonical boundary because ordinary gateways reject the unknown `input[*]` field. The
+ChatGPT web bridge locates the current turn's `<environment_context>` — and therefore its `cwd` —
+by that turn id, so the strip turns every routed turn into a bridge-side rejection rather than an
+HTTP error. `requiresCodexTurnMetadataPassthrough: true` keeps the field for such a destination;
+`providerRequiresCodexTurnMetadataPassthrough` is the single gate. It is deliberately separate from
+`supportsCodexResponsesCompaction`: one describes what the upstream returns, the other what it must
+be told.
+
 [Decision Log]
 - 목적과 의도: Complete Cursor turns at the protocol terminal instead of waiting for a separate HTTP-body EOF that may never arrive.
 - 기존 구현 및 제약 조건: Cursor can send turnEnded followed by a clean Connect END_STREAM envelope while RunSSE remains open or later closes through an abort-shaped transport error. The adapter logged the clean envelope but did not settle its terminal owner, so a completed-looking turn could remain open until the Responses stall watchdog.
@@ -335,6 +356,21 @@ Native passthrough SSE has TWO shapes, selected per request in
   directly to the response without a JS rewrite wrapper, preserving the full
   inspection side-effect set (shared `createSseInspector` factory in `relay.ts`)
   including the #44 late-terminal semantics.
+
+Both shapes owe the client exactly one protocol terminal. A mid-stream read
+failure becomes `response.failed` (`upstream_reset`) and a CLEAN upstream EOF
+that never carried a terminal becomes `response.incomplete`
+(`incomplete_details.reason: "upstream_eof"`), each followed by `data: [DONE]`.
+Handing over a body that simply stops is what Codex reports as
+`ApiError::Stream("stream closed before response.completed")`, so neither relay
+may close on an unterminated stream. The same rule covers the delimiter-less
+tail `finish()` flushes at EOF: if it already carries the terminal the relay
+closes that block with a blank line instead of appending a second terminal (SSE
+parsers discard an unterminated event), and `responses-terminal-repair.ts`
+likewise separates the preserved suffix from its synthetic terminal. Accounting
+keeps the two cases apart — `onCleanEof`/`onSynthetic("incomplete")` versus
+`onReadError`/`onSynthetic("failed")` + 502 — and
+`tests/sse-failed-tail.test.ts` pins legacy/eager byte parity for both tails.
 
 The two-shape contract is mirror-commented in `src/server/index.ts`; the real
 `core.ts` gate is source-invariant-tested by `tests/passthrough-abort.test.ts`,

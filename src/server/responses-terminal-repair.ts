@@ -307,6 +307,7 @@ export function relayResponsesSseWithTerminalRepair(
         if (disposed) return;
         if (done) {
           appendBuffer(decoder.decode());
+          let unframedSuffix = false;
           if (buffer.length > 0) {
             // A delimiter-less suffix is not a complete SSE event. Preserve an
             // ordinary suffix for passthrough compatibility, but never promote
@@ -314,12 +315,19 @@ export function relayResponsesSseWithTerminalRepair(
             // upstream. The latter must stay tainted and fail closed through the
             // synthetic incomplete terminal below.
             tainted = true;
-            if (!isUnframedTerminalLikeSuffix(buffer)) {
+            const suffixIsTerminalLike = isUnframedTerminalLikeSuffix(buffer);
+            const suffixIsDone = sseDataPayload(buffer) === "[DONE]";
+            if (!suffixIsTerminalLike || suffixIsDone) {
               controller.enqueue(encoder.encode(buffer));
-              controller.enqueue(encoder.encode(buffer.includes("\r\n") ? "\r\n\r\n" : "\n\n"));
+              unframedSuffix = true;
             }
           }
           if (!realTerminalSeen) {
+            // Terminate that suffix first. Concatenating the synthetic frame onto an
+            // unterminated block fuses both into one unparseable event, so the client
+            // ends up with no terminal at all — the exact failure this repair exists to
+            // prevent ("stream closed before response.completed").
+            if (unframedSuffix) controller.enqueue(encoder.encode("\n\n"));
             emitSynthetic(completeCandidate() ? "completed" : "incomplete", controller);
           }
           releaseBuffer();

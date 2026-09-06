@@ -12,6 +12,8 @@ import {
   destinationDecodesNativeCompactionBlob,
   isCanonicalOpenAiForwardProvider,
   isOpenAiOperatedResponsesDestination,
+  providerRequiresCodexTurnMetadataPassthrough,
+  providerSupportsCodexResponsesCompaction,
 } from "../providers/openai-tiers";
 import { OCX_REASONING_PREFIX } from "../responses/reasoning-envelope";
 import { configuredReasoningEfforts, mapReasoningEffort, modelRecordValue } from "../reasoning-effort";
@@ -2230,7 +2232,12 @@ export function createResponsesPassthroughAdapter(provider: OcxProviderConfig): 
       // `queries` for DeepSeek (#930), `query` for Console Go (#3071).
       outBody = backfillWebSearchQueries(outBody);
       if (!isCanonicalOpenAiForwardProvider(provider)) {
-        outBody = stripInternalChatMessageMetadataPassthrough(outBody);
+        // A sidecar that rebuilds a native Codex turn reads this metadata (the ChatGPT web bridge
+        // finds the turn's `<environment_context>` by its turn id), so an opted-in destination
+        // keeps it while every other noncanonical upstream still sheds the unknown parameter.
+        if (!providerRequiresCodexTurnMetadataPassthrough(provider)) {
+          outBody = stripInternalChatMessageMetadataPassthrough(outBody);
+        }
         outBody = promoteClientLoadedTools(outBody);
       }
       if (!isCanonicalOpenAiForwardProvider(provider)) {
@@ -2269,12 +2276,12 @@ export function createResponsesPassthroughAdapter(provider: OcxProviderConfig): 
         // Last, so promoted namespace children are also cleared of Codex-private fields.
         outBody = stripCanonicalOnlyToolFields(outBody, provider.supportsOpenAiWebSearchToolFields === false);
       }
-      // Same predicate as the routedCompaction gate in handleResponses(): an authMode check would
-      // let a noncanonical custom forward provider skip this rewrite while the server still routes
-      // it as a summarizer turn (#422). The compaction body build removes the tool surface and must
+      // Same predicate as the routedCompaction gate in handleResponses(): explicitly capable
+      // sidecars receive the native trigger, while every ordinary noncanonical gateway gets the
+      // summarizer rewrite (#422). The compaction body build removes the tool surface and must
       // therefore be the last routed transform: anything before it may depend on the declarations;
       // anything after it cannot.
-      if (parsed._compactionRequest === true && !isCanonicalOpenAiForwardProvider(provider)) {
+      if (parsed._compactionRequest === true && !providerSupportsCodexResponsesCompaction(provider)) {
         outBody = buildRoutedCompactionBody(outBody);
       }
       const threadServingIdentityChanged = parsed._stripReasoningEncryptedContent === true;

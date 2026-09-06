@@ -367,6 +367,20 @@ function applyProviderPatchFields(
     next.allowPrivateNetwork = rawBody.allowPrivateNetwork;
     touched = true;
   }
+  if (Object.hasOwn(rawBody, "supportsCodexResponsesCompaction")) {
+    if (typeof rawBody.supportsCodexResponsesCompaction !== "boolean") {
+      return { error: "supportsCodexResponsesCompaction must be a boolean" };
+    }
+    next.supportsCodexResponsesCompaction = rawBody.supportsCodexResponsesCompaction;
+    touched = true;
+  }
+  if (Object.hasOwn(rawBody, "requiresCodexTurnMetadataPassthrough")) {
+    if (typeof rawBody.requiresCodexTurnMetadataPassthrough !== "boolean") {
+      return { error: "requiresCodexTurnMetadataPassthrough must be a boolean" };
+    }
+    next.requiresCodexTurnMetadataPassthrough = rawBody.requiresCodexTurnMetadataPassthrough;
+    touched = true;
+  }
   if (Object.hasOwn(rawBody, "liveModels")) {
     if (typeof rawBody.liveModels !== "boolean") return { error: "liveModels must be a boolean" };
     next.liveModels = rawBody.liveModels;
@@ -674,6 +688,8 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
       // Presence only (#959 review): header names and values never leave the process.
       hasHeaders: !!p.headers && Object.keys(p.headers).length > 0,
       allowPrivateNetwork: p.allowPrivateNetwork === true,
+      supportsCodexResponsesCompaction: p.supportsCodexResponsesCompaction === true,
+      requiresCodexTurnMetadataPassthrough: p.requiresCodexTurnMetadataPassthrough === true,
       liveModels: p.liveModels !== false,
       requestPacing: p.requestPacing,
       models: p.models ?? [],
@@ -934,6 +950,8 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     // from "the registry supplied it" either. Without this sample, an unrelated edit that
     // omits the key resurrects the registry default over an operator's explicit `false`.
     const submittedAnnotateEmptyToolOutputs = Object.hasOwn(prov, "annotateEmptyToolOutputs");
+    const submittedCodexResponsesCompaction = Object.hasOwn(prov, "supportsCodexResponsesCompaction");
+    const submittedCodexTurnMetadata = Object.hasOwn(prov, "requiresCodexTurnMetadataPassthrough");
     enrichProviderFromCatalog(name, prov);
     const { saveConfigPreservingClaudeCode: save } = await import("../../config");
     // Overwriting an existing provider must not drop its multi-key pool: carry it over, then
@@ -960,6 +978,14 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     }
     if (!submittedRequestPacing && existing?.requestPacing) {
       prov.requestPacing = structuredClone(existing.requestPacing);
+    }
+    if (!submittedCodexResponsesCompaction
+      && existing?.supportsCodexResponsesCompaction !== undefined) {
+      prov.supportsCodexResponsesCompaction = existing.supportsCodexResponsesCompaction;
+    }
+    if (!submittedCodexTurnMetadata
+      && existing?.requiresCodexTurnMetadataPassthrough !== undefined) {
+      prov.requiresCodexTurnMetadataPassthrough = existing.requiresCodexTurnMetadataPassthrough;
     }
     if (!submittedContextWindow && existing?.contextWindow !== undefined) {
       prov.contextWindow = existing.contextWindow;

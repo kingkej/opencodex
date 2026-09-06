@@ -348,6 +348,14 @@ describe("DeepSeek Responses terminal repair", () => {
     expect(output).toContain('"type":"response.output_item.done"');
     expect(terminalTypes(output)).toEqual(["response.incomplete"]);
     expect(output).not.toContain('"type":"response.completed"');
+    // The unframed suffix is closed before the synthetic frame: fused blocks parse as one
+    // broken event, so the client would see no terminal and report a truncated stream.
+    expect(output).not.toContain("}event: response.incomplete");
+    for (const block of output.split("\n\n")) {
+      const data = block.split("\n").filter(line => line.startsWith("data: ")).map(line => line.slice(6)).join("\n");
+      if (!data || data === "[DONE]") continue;
+      expect(() => JSON.parse(data) as unknown).not.toThrow();
+    }
   });
 
   test("unframed terminal-like suffixes stay tainted and cannot outrank incomplete", async () => {

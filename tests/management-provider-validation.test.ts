@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { managementFetch as fetch, ManagementRequest as Request } from "./helpers/management-auth";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCodexAccountRecord, saveCodexAccountCredential } from "../src/codex/account-store";
@@ -1407,6 +1407,71 @@ describe("provider management validation", () => {
       });
       expect(reenable.status).toBe(200);
       expect(loadConfig().providers.deepseek?.annotateEmptyToolOutputs).toBe(true);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("native Codex compaction capability validates, projects, and survives provider edits", async () => {
+    const capable = {
+      adapter: "openai-responses",
+      baseUrl: "https://sidecar.example.test/v1",
+      liveModels: false,
+      models: ["pro"],
+      supportsCodexResponsesCompaction: true,
+    };
+    expect(providerManagementConfigError("sidecar", capable)).toBeNull();
+    expect(providerManagementConfigError("sidecar", {
+      ...capable,
+      adapter: "openai-chat",
+    })).toContain("requires adapter openai-responses");
+
+    const dto = safeConfigDTO({
+      port: 10100,
+      defaultProvider: "sidecar",
+      providers: { sidecar: capable },
+    } as OcxConfig) as {
+      providers: Record<string, { supportsCodexResponsesCompaction?: boolean }>;
+    };
+    expect(dto.providers.sidecar?.supportsCodexResponsesCompaction).toBe(true);
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(TEST_DIR, { recursive: true });
+    process.env.OPENCODEX_HOME = TEST_DIR;
+    saveConfig(config("127.0.0.1"));
+
+    const server = startServer(0);
+    try {
+      const create = await fetch(new URL("/api/providers", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "sidecar", provider: capable }),
+      });
+      expect(create.status).toBe(200);
+
+      const overwrite = await fetch(new URL("/api/providers", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "sidecar",
+          provider: {
+            adapter: "openai-responses",
+            baseUrl: "https://sidecar.example.test/v1",
+            liveModels: false,
+            models: ["pro"],
+          },
+        }),
+      });
+      expect(overwrite.status).toBe(200);
+      expect(loadConfig().providers.sidecar?.supportsCodexResponsesCompaction).toBe(true);
+
+      const patch = await fetch(new URL("/api/providers?name=sidecar", server.url), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ supportsCodexResponsesCompaction: false }),
+      });
+      expect(patch.status).toBe(200);
+      expect(loadConfig().providers.sidecar?.supportsCodexResponsesCompaction).toBe(false);
     } finally {
       await server.stop(true);
     }

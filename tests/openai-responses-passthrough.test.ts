@@ -172,6 +172,36 @@ test("noncanonical Responses destinations strip Codex-private item metadata", ()
     .toBe(true);
 });
 
+test("an opted-in noncanonical sidecar keeps Codex-private item metadata", () => {
+  const request = createResponsesPassthroughAdapter({
+    adapter: "openai-responses",
+    baseUrl: "http://127.0.0.1:17841/v1",
+    authMode: "local",
+    allowPrivateNetwork: true,
+    requiresCodexTurnMetadataPassthrough: true,
+  }).buildRequest({
+    modelId: "pro",
+    context: { messages: [] },
+    stream: true,
+    options: {},
+    _rawBody: {
+      model: "pro",
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "<environment_context>\n  <cwd>/repo</cwd>\n</environment_context>" }],
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-1" },
+      }],
+    },
+  }, { headers: new Headers() });
+  const body = JSON.parse(request.body) as {
+    input: { internal_chat_message_metadata_passthrough?: unknown }[];
+  };
+
+  expect(body.input[0].internal_chat_message_metadata_passthrough)
+    .toEqual({ turn_id: "turn-1" });
+});
+
 test("canonical ChatGPT forward preserves Codex-private item metadata", () => {
   const request = createResponsesPassthroughAdapter(provider).buildRequest({
     modelId: "gpt-5.6-sol",

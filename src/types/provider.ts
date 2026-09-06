@@ -266,6 +266,20 @@ export interface OcxProviderConfig {
    */
   preserveResponsesReasoningContent?: boolean;
   /**
+   * Explicit opt-in for a noncanonical Responses upstream that implements Codex's private
+   * remote-compaction contract (`compaction_trigger` in, exactly one `compaction` item out).
+   * Absent or false keeps the safe routed-summarizer fallback for ordinary gateways.
+   */
+  supportsCodexResponsesCompaction?: boolean;
+  /**
+   * Explicit opt-in for a noncanonical Responses sidecar that requires Codex's private
+   * `internal_chat_message_metadata_passthrough` item metadata to stay on `input[*]`.
+   * The ChatGPT web bridge locates the current turn's `<environment_context>` message by that
+   * turn id, so stripping it there fails the turn instead of the request. Absent or false keeps
+   * the default strip, because ordinary gateways reject the field as an unknown parameter.
+   */
+  requiresCodexTurnMetadataPassthrough?: boolean;
+  /**
    * Explicit opt-in for a relay that genuinely fronts OpenAI and can decode native
    * compaction blobs. Absent or false degrades foreign blobs to an opaque note.
    */

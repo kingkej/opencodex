@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   apiKeyTransportConfigError,
   booleanRecordConfigError,
+  codexResponsesCompactionConfigError,
+  codexTurnMetadataPassthroughConfigError,
   modelAdapterRecordConfigError,
   modelDisplayNamesConfigError,
   nonBlankStringArrayConfigError,
@@ -36,6 +38,36 @@ describe("provider config validation leaf", () => {
     expect(apiKeyTransportConfigError({ adapter: "openai-chat", authMode: "key", apiKeyTransport: "bearer" })).toContain("anthropic adapter");
     expect(apiKeyTransportConfigError({ adapter: "anthropic", authMode: "oauth", apiKeyTransport: "bearer" })).toContain("API-key authentication");
     expect(apiKeyTransportConfigError({ adapter: "anthropic", authMode: "key", apiKeyTransport: "invalid" as "bearer" })).toContain("x-api-key");
+  });
+
+  test("keeps native Codex compaction on Responses providers only", () => {
+    expect(codexResponsesCompactionConfigError({
+      adapter: "openai-responses",
+      supportsCodexResponsesCompaction: true,
+    })).toBeNull();
+    expect(codexResponsesCompactionConfigError({
+      adapter: "openai-chat",
+      supportsCodexResponsesCompaction: true,
+    })).toContain("requires adapter openai-responses");
+    expect(codexResponsesCompactionConfigError({
+      adapter: "openai-chat",
+      supportsCodexResponsesCompaction: false,
+    })).toBeNull();
+  });
+
+  test("keeps Codex item-metadata passthrough on Responses providers only", () => {
+    expect(codexTurnMetadataPassthroughConfigError({
+      adapter: "openai-responses",
+      requiresCodexTurnMetadataPassthrough: true,
+    })).toBeNull();
+    expect(codexTurnMetadataPassthroughConfigError({
+      adapter: "openai-chat",
+      requiresCodexTurnMetadataPassthrough: true,
+    })).toContain("requires adapter openai-responses");
+    expect(codexTurnMetadataPassthroughConfigError({
+      adapter: "openai-chat",
+      requiresCodexTurnMetadataPassthrough: false,
+    })).toBeNull();
   });
 
   test("shares the upstream HTTP-version enum across write and load boundaries", () => {

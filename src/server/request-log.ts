@@ -831,6 +831,8 @@ function incompleteReasonLabel(reason: string): string {
       return `Upstream stalled: no data for the stall-timeout window (${reason})`;
     case "adapter_eof":
       return `Upstream stream ended unexpectedly without a terminal event (${reason})`;
+    case "upstream_eof":
+      return `Upstream closed the stream before a terminal event (${reason})`;
     default:
       return `Upstream incomplete: ${reason}`;
   }
