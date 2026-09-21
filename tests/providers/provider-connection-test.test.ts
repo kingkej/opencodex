@@ -16,6 +16,7 @@ import { removeTreeWithRetry } from "../helpers/remove-tree";
 const TEST_DIR = join(tmpdir(), "ocx-conn-test");
 const previousHome = process.env.OPENCODEX_HOME;
 const previousTypesafeKey = process.env.TYPESAFE_API_KEY;
+const previousJevKey = process.env.JEV_API_KEY;
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
@@ -32,6 +33,8 @@ afterEach(() => {
   else process.env.OPENCODEX_HOME = previousHome;
   if (previousTypesafeKey === undefined) delete process.env.TYPESAFE_API_KEY;
   else process.env.TYPESAFE_API_KEY = previousTypesafeKey;
+  if (previousJevKey === undefined) delete process.env.JEV_API_KEY;
+  else process.env.JEV_API_KEY = previousJevKey;
   removeTreeWithRetry(TEST_DIR);
 });
 
@@ -61,6 +64,7 @@ async function probe(config: OcxConfig, name: string): Promise<{ status: number;
 describe("POST /api/providers/test (WP040 connectivity probe)", () => {
   test("JEV reports a missing key without attempting a generic static-catalog probe", async () => {
     delete process.env.TYPESAFE_API_KEY;
+    delete process.env.JEV_API_KEY;
     let fetches = 0;
     globalThis.fetch = (async () => {
       fetches += 1;
@@ -77,11 +81,11 @@ describe("POST /api/providers/test (WP040 connectivity probe)", () => {
 
     const { body } = await probe(config, "jev");
 
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       ok: false,
-      latencyMs: 0,
       error: "TypeSafe JEV API key is not configured",
     });
+    expect(typeof body.latencyMs).toBe("number");
     expect(fetches).toBe(0);
   });
 

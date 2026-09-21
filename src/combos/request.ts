@@ -109,6 +109,7 @@ export function concreteComboRequestBody(
     }
     return clone;
   }
+  if (defaultEffortMode === "force") stripAlternativeReasoningControls(clone);
   if (reasoning === undefined) {
     clone.reasoning = { effort: resolvedEffort };
   } else {
@@ -125,6 +126,10 @@ function stripUnsupportedReasoningControls(body: Record<string, unknown>): void 
     if (Object.keys(next).length > 0) body.reasoning = next;
     else delete body.reasoning;
   }
+  stripAlternativeReasoningControls(body);
+}
+
+function stripAlternativeReasoningControls(body: Record<string, unknown>): void {
   delete body.reasoning_effort;
   delete body.thinking_budget;
   delete body.thinking;
