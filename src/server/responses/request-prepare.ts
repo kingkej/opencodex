@@ -20,6 +20,7 @@ import {
   sessionIdHeaderFromRequest,
   reasoningReplayConversationIdFromResponsesRequest,
 } from "../request-log-conversation";
+import { resolveContextPrincipal } from "../auth-cors";
 import {
   isShadowSourceModel,
   shadowSourceModelPrefix,
@@ -406,6 +407,17 @@ export async function prepareResponsesRequest(
     if (reasoningReplayConversationId) {
       parsed._reasoningReplayScope = { clientThreadId: reasoningReplayConversationId };
     }
+  }
+  if (parsed._reasoningReplayScope) {
+    // Scope replay cells to the caller principal. On loopback, admission carries no identity,
+    // so resolve it from an opencodex API key the caller volunteered (same rule as context
+    // history ownership). A caller that presents none has no principal, and none is invented:
+    // every keyless local process would otherwise share one bucket, and a client-visible cell id
+    // would become enough to read another caller's retained search result. Without a principal
+    // bridgeSearchReplayScope yields no scope, so nothing is recorded or restored for it. The
+    // field is always rewritten so an absent principal also clears one a reused holder carried.
+    const clientPrincipalId = resolveContextPrincipal(req, config, options.admission);
+    parsed._reasoningReplayScope = { ...parsed._reasoningReplayScope, clientPrincipalId };
   }
   // Prefer a pre-populated id (routed Claude) over Responses headers that may be
   // absent or synthetically injected (session_id from prompt_cache_key).

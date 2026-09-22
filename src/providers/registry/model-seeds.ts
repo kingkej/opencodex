@@ -6,8 +6,11 @@ import type { ProviderModelDiscoverySpec } from "./types";
 // devlog/_plan/260710_provider_hardening/001_research_frontier.md.
 // 260902 Claude Fable 5.1 (`claude-fable-5-1`): 1M context / 128K output / adaptive thinking
 // always on, per the official models overview and pricing page (platform.claude.com).
-export const ANTHROPIC_MODELS = ["claude-fable-5-1", "claude-fable-5", "claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
-export const ANTHROPIC_MODEL_CONTEXT_WINDOWS: Record<string, number> = { "claude-fable-5-1": 1_000_000, "claude-sonnet-5": 1_000_000, "claude-fable-5": 1_000_000, "claude-opus-5": 1_000_000, "claude-opus-4-8": 1_000_000, "claude-opus-4-7": 1_000_000, "claude-opus-4-6": 1_000_000, "claude-sonnet-4-6": 1_000_000, "claude-haiku-4-5": 200_000 };
+// 260923 Claude Opus 5.5 (`claude-opus-5-5`, released 2026-09-22): 1M context / 128K output /
+// adaptive thinking always on / effort low..max with a medium default, per the Opus 5.5
+// overview, effort and pricing pages (platform.claude.com).
+export const ANTHROPIC_MODELS = ["claude-fable-5-1", "claude-fable-5", "claude-sonnet-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
+export const ANTHROPIC_MODEL_CONTEXT_WINDOWS: Record<string, number> = { "claude-fable-5-1": 1_000_000, "claude-sonnet-5": 1_000_000, "claude-fable-5": 1_000_000, "claude-opus-5-5": 1_000_000, "claude-opus-5": 1_000_000, "claude-opus-4-8": 1_000_000, "claude-opus-4-7": 1_000_000, "claude-opus-4-6": 1_000_000, "claude-sonnet-4-6": 1_000_000, "claude-haiku-4-5": 200_000 };
 // All seeded Claude models support vision: https://platform.claude.com/docs/en/models/overview
 export const ANTHROPIC_MODEL_INPUT_MODALITIES: Record<string, string[]> = Object.fromEntries(
   ANTHROPIC_MODELS.map(id => [id, ["text", "image"]]),
@@ -154,6 +157,12 @@ export const OPENAI_API_GPT56_VIRTUAL_MODELS: Record<string, { wireModelId: stri
   "gpt-5.6-luna-pro": { wireModelId: "gpt-5.6-luna", reasoningMode: "pro" },
 };
 export const OPENAI_API_GPT56_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+/**
+ * GPT-6 Sol and Luna on the OpenAI API (released 2026-09-22,
+ * https://developers.openai.com/api/docs/changelog). Added 2026-09-23 ahead of live discovery; the
+ * API window is not published yet, so the rows mirror gpt-6-astra's 1,050,000 / 922,000 API seed.
+ */
+export const OPENAI_GPT6_MODELS = ["gpt-6-sol", "gpt-6-luna"];
 /*
  * Meta Model API (https://api.meta.ai/v1) — published ladder, deliberately NOT the
  * house set. dev.meta.ai/docs/reasoning lists "none", "minimal", "low", "medium",
@@ -238,6 +247,9 @@ export const OPENROUTER_GPT56_CONTEXT_WINDOWS = {
   "openai/gpt-5.6-sol": OPENROUTER_GPT56_CONTEXT_WINDOW,
   "openai/gpt-5.6-terra": OPENROUTER_GPT56_CONTEXT_WINDOW,
   "openai/gpt-5.6-luna": OPENROUTER_GPT56_CONTEXT_WINDOW,
+  // 260923 preemptive: GPT-6 Sol/Luna ahead of OpenRouter's own listing; same window as GPT-5.6.
+  "openai/gpt-6-sol": OPENROUTER_GPT56_CONTEXT_WINDOW,
+  "openai/gpt-6-luna": OPENROUTER_GPT56_CONTEXT_WINDOW,
 };
 
 /**
@@ -838,6 +850,9 @@ export const DIGITALOCEAN_CHAT_COMPLETION_MODELS = [
   "openai-gpt-5.6-sol",
   "openai-gpt-5.6-terra",
   "openai-gpt-5.6-luna",
+  // 260923 preemptive: GPT-6 Sol/Luna ahead of DigitalOcean's model list.
+  "openai-gpt-6-sol",
+  "openai-gpt-6-luna",
   "qwen3-coder-flash",
   "qwen3.5-397b-a17b",
   "deepseek-4-flash",
@@ -1003,8 +1018,11 @@ export const CLINE_PASS_MODEL_INPUT_MODALITIES: Record<string, string[]> = Objec
 // catalogue snapshot supplied by the original provider author
 // (https://api.opper.ai/v3/models?limit=2000, captured 2026-09-14); `vendor/model` ids
 // (anthropic/claude-sonnet-4-6) pin one route and stay valid, they are just not seeded.
+// 260923: `claude-opus-5-5` pool (anthropic, aws eu, vertex, vertex-eu members; all 1M / 128K,
+// vision) read from the same catalogue endpoint the day after Anthropic's release.
 export const OPPER_MODELS = [
   "claude-sonnet-4-6",
+  "claude-opus-5-5",
   "claude-opus-5",
   "gpt-5.5",
   "gpt-5.4-mini",
@@ -1017,6 +1035,7 @@ export const OPPER_MODELS = [
 // (kimi-k3 output); live discovery owns which models exist.
 export const OPPER_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-sonnet-4-6": 1_000_000,
+  "claude-opus-5-5": 1_000_000,
   "claude-opus-5": 1_000_000,
   "gpt-5.5": 1_050_000,
   "gpt-5.4-mini": 400_000,
@@ -1027,6 +1046,7 @@ export const OPPER_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 };
 export const OPPER_MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "claude-sonnet-4-6": 64_000,
+  "claude-opus-5-5": 128_000,
   "claude-opus-5": 128_000,
   "gpt-5.5": 128_000,
   "gpt-5.4-mini": 128_000,

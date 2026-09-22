@@ -93,7 +93,7 @@ metadata, and Pro virtual ids rewrite to the base wire model with `reasoning.mod
 shipped v1 config, opencodex creates `config.json.pre-openai-tiers-v2.bak` without replacing a
 differing backup and rewrites known legacy namespaced selected ids to bare ids.
 
-### GPT-6 Astra
+### GPT-6 Astra, Sol, Luna and Astra Minor
 
 `gpt-6-astra` uses the Codex-login route; `openai-apikey/gpt-6-astra` uses your API key.
 Availability still depends on the upstream account. Native Astra keeps the shipped Codex defaults:
@@ -111,6 +111,27 @@ and API reasoning efforts through `max`. OpenCodex's routed synthetic Ultra cont
 existing wire-effort mapping; it is not an additional API effort. There is no Astra `-pro` alias.
 Use the existing `fastMode` setting, or Codex's `service_tier = "fast"` with
 `[features].fast_mode = true`; API `fast` and `priority` are accepted Fast spellings.
+
+[GPT-6 Sol and Luna](https://openai.com/index/introducing-gpt-6-sol-and-luna/) (announced
+September 22, 2026) are Codex-login natives: `gpt-6-sol` and `gpt-6-luna`, shown as **GPT-6-Sol**
+and **GPT-6-Luna**. Like Astra they are listed on every install and are not gated on an account
+roster; if your account cannot use them yet, the request still goes out and you see the upstream
+error. Their metadata comes from the Codex `/models` roster, which serves these two rows only to
+`client_version` **0.155.0 or later**; opencodex ships a copy of those rows, so they appear even
+when your installed Codex catalog predates them.
+
+| Model | Default context | Opt-in ceiling | Default effort | Reasoning ladder |
+| --- | ---: | ---: | --- | --- |
+| `gpt-6-sol` | 272,000 | 872,000 | `medium` | `low` through `ultra` |
+| `gpt-6-luna` | 272,000 | 872,000 | `medium` | `low` through `max` (no `ultra`) |
+
+The same `providerContextCaps.openai`, `modelContextWindows` and `modelAutoCompactTokenLimits`
+levers apply as for Astra. There are no `openai-apikey/` rows or built-in price estimates for Sol
+or Luna yet.
+
+`gpt-6-astra-minor` (**GPT-6-Astra-Minor**) is an unreleased Astra variant. It is account-gated:
+it stays hidden, and requests for it are refused locally, until an authenticated Codex roster for
+your account lists it. When it appears it uses Astra's context, ladder and modalities.
 
 Pricing checked September 5, 2026:
 
@@ -241,6 +262,11 @@ served the first request. Changing the selected key, its reference or resolved v
 mode, or base URL during search or provider pacing ends the turn with a bridge error before another
 provider request is sent. Changing away and back also ends that continuation. Start a new turn to
 use the new selection. Selection changes before the first provider send retain normal reselection.
+
+A bridged search result is shown to the provider again on the conversation's next turn only for
+the same caller, conversation, provider, model and selected key. The caller is identified by the
+opencodex API key it presents, so a client that sends no opencodex API key gets no such replay:
+its earlier search cells reach the provider unchanged, as they do for a provider without the bridge.
 
 Custom-model `reasoningEfforts` normally override discovered provider metadata. The bounded
 exception is an explicit custom row whose model id has pinned native Codex capabilities,
@@ -482,7 +508,7 @@ Grok — so the Cursor entry declares `fastWire.kind: "cursor-variant"` and the 
 builder resolves the variant instead of setting a request field.
 
 Only the bases that actually declare a fast variant advertise Fast: `claude-opus-4-7`,
-`claude-opus-4-8`, `claude-opus-5`, `grok-4.5`, `grok-4.6`. Every other Cursor row publishes
+`claude-opus-4-8`, `claude-opus-5`, `claude-opus-5-5`, `grok-4.5`, `grok-4.6`. Every other Cursor row publishes
 `supportsServiceTier: false`, so Codex shows no toggle rather than a dead one.
 
 A base whose umbrella row routes thinking upgrades to its **thinking-fast** variant, not to
