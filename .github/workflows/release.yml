@@ -228,6 +228,7 @@ jobs:
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: stable
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
@@ -336,6 +337,13 @@ jobs:
           echo "$description" | grep -q "flags=.*runtime"
           echo "$description" | grep -q "Timestamp="
 
+      - name: Prepare Windows installer version
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bun desktop/scripts/windows-installer-config.ts "$RELEASE_VERSION" "$RUNNER_TEMP/opencodex-msi.json"
+
       # Release signing is intentionally secret-gated. Developer ID, notarization,
       # and updater signatures require maintainer-owned credentials; builds without
       # those secrets remain useful for local validation but are not release assets.
@@ -351,7 +359,9 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MACOS_SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: bunx tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+        # linuxdeploy suppresses its own stderr at the default verbosity. Keep
+        # diagnostics on the first attempt; Apple signing commands stay non-verbose.
+        run: bunx tauri ${{ runner.os == 'Linux' && '--verbose' || '' }} build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config "${{ runner.os == 'Windows' && format('{0}/opencodex-msi.json', runner.temp) || '{}' }}"
 
       - name: Rename release assets
         shell: bash
@@ -744,6 +754,7 @@ jobs:
       # PREREQUISITE: configure the Trusted Publisher for this repo + workflow on npmjs.com — possible
       # only AFTER the package's first version exists (do the first publish locally, see the runbook).
       - name: Preflight release metadata
+        id: metadata
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
@@ -792,6 +803,12 @@ jobs:
           fi
           if npm view "${pkg_name}@${RELEASE_VERSION}" version >/dev/null 2>&1; then
             if [ "$RESUME" = "true" ]; then
+              resume_git_head="$(timeout --kill-after=2s 10s npm view "${pkg_name}@${RELEASE_VERSION}" gitHead --json --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=8000)" || {
+                echo "::error::Cannot verify the existing npm package source; resume refused"
+                exit 1
+              }
+              bun scripts/verify-release-resume.ts "$GITHUB_SHA" "$resume_git_head"
+              echo "resume_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
               echo "::notice::${pkg_name}@${RELEASE_VERSION} is acknowledged on npm; resuming after the recorded partial publication"
             elif [ "$dry_run" = "true" ]; then
               echo "::notice::${pkg_name}@${RELEASE_VERSION} already exists on npm; dry-run only"
@@ -846,10 +863,15 @@ jobs:
           NPM_DIST_TAG: ${{ inputs.tag }}
           RESUME: ${{ inputs.resume-after-npm-publish }}
           RELEASE_VERSION: ${{ inputs.version }}
+          VERIFIED_RESUME_SHA: ${{ steps.metadata.outputs.resume_sha }}
         run: |
           set -euo pipefail
           pkg_name="$(node -p "require('./package.json').name")"
           if [ "$RESUME" = "true" ]; then
+            if [ -z "$VERIFIED_RESUME_SHA" ] || [ "$VERIFIED_RESUME_SHA" != "$GITHUB_SHA" ]; then
+              echo "::error::Resume has no matching registry source verification; publication remains unacknowledged"
+              exit 1
+            fi
             # npm publication was acknowledged by the earlier run and confirmed by the
             # preflight above; completing the GitHub side must never republish.
             echo "::notice::RESUME — npm publish skipped; publication already acknowledged"
