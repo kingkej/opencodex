@@ -23,6 +23,7 @@
  * `com.opencodex.proxy.plist`.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -158,6 +159,28 @@ function captureLog(body: () => void): string[] {
   }
   return lines;
 }
+
+const macOsTest = process.platform === "darwin" ? test : test.skip;
+macOsTest("launchd shell preserves the installed PATH when a login profile changes it", () => {
+  const home = mkdtempSync(join(tmpdir(), "ocx-launchd-path-"));
+  const installedBin = join(home, "installed-bin");
+  const profileBin = join(home, "profile-bin");
+  mkdirSync(installedBin);
+  mkdirSync(profileBin);
+  writeFileSync(join(installedBin, "node"), "#!/bin/sh\nprintf installed\n", { mode: 0o755 });
+  writeFileSync(join(profileBin, "node"), "#!/bin/sh\nprintf profile\n", { mode: 0o755 });
+  writeFileSync(join(home, ".profile"), `PATH='${profileBin}'\n`);
+
+  const plist = buildPlist();
+  const shellMode = /<key>ProgramArguments<\/key>\s*<array>\s*<string>\/bin\/sh<\/string>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];
+  expect(shellMode).toBeDefined();
+  const result = spawnSync("/bin/sh", [shellMode!, "command -v node"], {
+    env: { ...process.env, HOME: home, PATH: `${installedBin}:${profileBin}` },
+    encoding: "utf8",
+  });
+  expect(result.status).toBe(0);
+  expect(result.stdout.trim()).toBe(join(installedBin, "node"));
+});
 
 describe("installLaunchd: repair must not be an outage (#4236 defect 1)", () => {
   test("a healthy job loaded from a byte-identical plist is a no-op — launchd is never touched", () => {

@@ -78,7 +78,7 @@ export function buildPlist(
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string>
-    <string>-lc</string>
+    <string>-c</string>
     <string>${plistString(command)}</string>
   </array>
   <key>RunAtLoad</key><true/>

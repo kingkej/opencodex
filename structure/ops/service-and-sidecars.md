@@ -62,6 +62,8 @@ rediscovered by the current launcher. The API-auth token remains file-backed and
 the service shell at start. On macOS, `start` and detailed `status` compare the live launchd job
 against `expectedLaunchdCommand`, which follows the recorded `launcherPath` rather than re-walking
 PATH, so a launcher-backed job is never misreported as an older plist (#3464).
+The launchd wrapper uses a non-login shell so the plist's captured PATH remains authoritative;
+a login profile can otherwise replace its native Node path with an incompatible executable.
 
 > Decision record: [ADR-0030](../decisions/ADR-0030-stable-service-launcher-launchd-and-systemd.md)
 
