@@ -111,9 +111,13 @@ export function concreteComboRequestBody(
   }
   if (defaultEffortMode === "force") stripAlternativeReasoningControls(clone);
   if (reasoning === undefined) {
-    clone.reasoning = { effort: resolvedEffort };
+    clone.reasoning = { effort: resolvedEffort, summary: "auto" };
   } else {
-    clone.reasoning = { ...(reasoning as Record<string, unknown>), effort: resolvedEffort };
+    clone.reasoning = {
+      ...(reasoning as Record<string, unknown>),
+      effort: resolvedEffort,
+      ...((reasoning as Record<string, unknown>).summary === undefined ? { summary: "auto" } : {}),
+    };
   }
   return clone;
 }

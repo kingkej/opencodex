@@ -20,6 +20,7 @@ import {
   sessionIdHeaderFromRequest,
   reasoningReplayConversationIdFromResponsesRequest,
 } from "../request-log-conversation";
+import { resolveContextPrincipal } from "../auth-cors";
 import {
   isShadowSourceModel,
   shadowSourceModelPrefix,
@@ -225,6 +226,7 @@ export async function prepareResponsesRequest(
   // hops — which only exist inside that loop — are unreachable (#4129). Rewrite the selector
   // here instead, before comboIdFromRawBody reads `model`, and identify the combo by CONFIG
   // LOOKUP so the check can never observe a one-candidate collapse.
+  let shadowCallIntercepted = false;
   if (!options.comboAttempt && !options.compactionRoutingOverride && body && typeof body === "object" && !Array.isArray(body)) {
     const shadowIntercept = config.shadowCallIntercept;
     const rawShadowModel = (body as { model?: unknown }).model;
@@ -232,6 +234,7 @@ export async function prepareResponsesRequest(
       && isShadowSourceModel(rawShadowModel, shadowIntercept.sourceModels)) {
       const shadowComboId = resolveComboId(config, shadowIntercept.model);
       if (shadowComboId && Object.hasOwn(config.combos ?? {}, shadowComboId)) {
+        shadowCallIntercepted = true;
         (body as Record<string, unknown>).model = shadowIntercept.model;
         // Same rule as the late intercept site: record the operator-configured prefix that
         // matched, never the caller's raw model string. Matching is by prefix, so the raw
@@ -247,6 +250,9 @@ export async function prepareResponsesRequest(
     options.onRequestBodyRead?.();
     return requestDispatchers.handleComboResponses(req, body, comboId, config, logCtx, {
       ...options,
+      // Concrete combo child selectors no longer match the shadow source model. Carry the
+      // interception decision explicitly so provider-specific helper isolation still applies.
+      shadowCallIntercepted,
       // The original request body was accepted above. Combo children are synthetic
       // replays and must not repeat the caller-owned timeout transition.
       onRequestBodyRead: undefined,
@@ -369,6 +375,7 @@ export async function prepareResponsesRequest(
       }
     }
     if (cursorClientThreadId) parsed._cursorClientThreadId = cursorClientThreadId;
+    if (options.shadowCallIntercepted === true) parsed._cursorIsolateConversation = true;
   } catch (err) {
     if (isTranslatorBudgetExceededError(err)) {
       return formatErrorResponse(413, "request_too_large", "request translation buffer exceeded the safe limit", {
@@ -406,6 +413,17 @@ export async function prepareResponsesRequest(
     if (reasoningReplayConversationId) {
       parsed._reasoningReplayScope = { clientThreadId: reasoningReplayConversationId };
     }
+  }
+  if (parsed._reasoningReplayScope) {
+    // Scope replay cells to the caller principal. On loopback, admission carries no identity,
+    // so resolve it from an opencodex API key the caller volunteered (same rule as context
+    // history ownership). A caller that presents none has no principal, and none is invented:
+    // every keyless local process would otherwise share one bucket, and a client-visible cell id
+    // would become enough to read another caller's retained search result. Without a principal
+    // bridgeSearchReplayScope yields no scope, so nothing is recorded or restored for it. The
+    // field is always rewritten so an absent principal also clears one a reused holder carried.
+    const clientPrincipalId = resolveContextPrincipal(req, config, options.admission);
+    parsed._reasoningReplayScope = { ...parsed._reasoningReplayScope, clientPrincipalId };
   }
   // Prefer a pre-populated id (routed Claude) over Responses headers that may be
   // absent or synthetically injected (session_id from prompt_cache_key).
@@ -568,6 +586,7 @@ export async function prepareResponsesRequest(
     options.codexAuthPolicy ?? config,
     previewRequestScopedMainCredential,
     route.codexAccountId,
+    codexQuotaScopeForModel(route.modelId),
   ).preserve;
   // Deliberately NOT fenced on ownership: final auth derives `nativeMainSelectionOnly` from the
   // drain alone, and adding a term here would diverge from it in the other direction.
@@ -824,6 +843,7 @@ export async function prepareResponsesRequest(
                 options.codexAuthPolicy ?? config,
                 recoveryRequestScopedMainCredential,
                 route.codexAccountId,
+                codexQuotaScopeForModel(route.modelId),
               ).preserve;
               const recoverySelectionOptions = {
                 nativeMainSelectionOnly: !recoveryNativeMainBlocked

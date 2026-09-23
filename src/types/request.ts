@@ -31,6 +31,11 @@ export interface OcxReasoningReplayIdentity {
  */
 export interface OcxReasoningReplayScopeRef {
   /**
+   * Process-local caller principal from resolveContextPrincipal. Absent when the caller presented
+   * no identity (keyless loopback); replay state keyed by it then fails closed.
+   */
+  readonly clientPrincipalId?: string;
+  /**
    * Conversation namespace for replay state. Historically this was always the Codex parent-thread
    * id; headerless Responses callers use a raw sanitized thread/Cursor/session fallback, never the
    * hashed request-log conversation id.
