@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { stampApiKeyAccountLabel, usesApiKeyAccount } from "../providers/label";
 import { KEY_ACCOUNT_LOG_LABEL_RE } from "../codex/account-label";
+import { attemptAccountChanged, sealRequestAttemptIdentity } from "./request-log-account-rotation";
+export { sealRequestAttemptIdentity };
 import { readBoundedResponseBody } from "../lib/bounded-body";
 import type { ResponsesTerminalStatus } from "../bridge";
 import {
@@ -20,6 +22,8 @@ import type { CodexAffinityMove, CodexAffinityReason } from "../codex/routing";
 import { readCodexCatalogPath } from "../codex/catalog";
 import type { AttemptTierOutcome, OcxProviderConfig, OcxUsage } from "../types";
 import { normalizeRouteDecisionTrace, type RouteDecisionTraceV1 } from "../routing/trace";
+import { parseProtocolTraceV1, type ProtocolTraceV1 } from "../protocols/dto";
+import { protocolTraceForRequest } from "../protocols/trace";
 import type { AdapterRequest } from "../adapters/base";
 import type { RequestSpendSettlement } from "./responses/request-spend";
 import type { AdapterTierMetadata } from "../providers/fastwire";
@@ -68,7 +72,8 @@ import {
   USAGE_DEBUG_BODY_SAMPLE_BYTES,
   type UsageDebugBodyKind,
 } from "../usage/debug";
-import { matchesLogConversationId } from "./request-log-conversation";
+import { MAX_LOG_SIZE } from "./request-log-filter";
+export { filterRequestLogs, filteredRequestLogCount } from "./request-log-filter";
 import { enforceAppOwnedMemoryBudget, type RetainedStoreSnapshot } from "../lib/app-owned-memory";
 import { capEstimateAtContextWindow } from "../lib/token-estimate";
 import { inferCursorContextWindow } from "../adapters/cursor/discovery";
@@ -364,11 +369,12 @@ export interface RequestLogEntry {
    */
   failureStage?: RequestFailureStage;
   failureCause?: RequestFailureCause;
+  /** Observed protocol path (PF-02, `src/protocols/trace.ts`); absent when nothing was observed. */
+  protocolTrace?: ProtocolTraceV1;
 }
 
 const requestLog: RequestLogEntry[] = [];
 const requestLogObserversForTests = new Set<(entry: RequestLogEntry) => void>();
-const MAX_LOG_SIZE = 2000;
 const requestLogEntryBytes = new WeakMap<RequestLogEntry, number>();
 let requestLogBytes = 0;
 /** True after hydrateRequestLogsFromDisk ran once in this process. */
@@ -436,6 +442,7 @@ export function requestLogEntryFromPersistedUsage(entry: PersistedUsageEntry): R
   const jevDecision = normalizePersistedJevDecision(entry.jevDecision);
   const claudeCompatibility = normalizeClaudeCompatibilityUsageLog(entry.claudeCompatibility);
   const spend = normalizeRequestSpend(entry.spend);
+  const protocolTrace = parseProtocolTraceV1(entry.protocolTrace);
   return {
     requestId: entry.requestId,
     ...(isLogicalRequestId(entry.logicalRequestId) ? { logicalRequestId: entry.logicalRequestId } : {}),
@@ -492,6 +499,7 @@ export function requestLogEntryFromPersistedUsage(entry: PersistedUsageEntry): R
       ? { conversationStateScrub: "account-change" }
       : {}),
     ...normalizeRequestFailureAttribution(entry),
+    ...(protocolTrace ? { protocolTrace } : {}),
   };
 }
 
@@ -676,6 +684,7 @@ export function addRequestLog(entry: RequestLogEntry) {
       ...(entry.routeDecision ? { routeDecision: entry.routeDecision } : {}),
       ...(entry.jevDecision ? { jevDecision: entry.jevDecision } : {}),
       ...(entry.claudeCompatibility ? { claudeCompatibility: entry.claudeCompatibility } : {}),
+      ...(entry.protocolTrace ? { protocolTrace: entry.protocolTrace } : {}),
       ...(entry.conversationStateScrub === "account-change"
         ? { conversationStateScrub: "account-change" }
         : {}),
@@ -1519,6 +1528,8 @@ export function addFinalRequestLog(
   const shadowCallRewrittenFrom = sanitizeLogMetadataString(logCtx.shadowCallRewrittenFrom);
   const claudeCompatibility = normalizeClaudeCompatibilityUsageLog(logCtx.claudeCompatibility);
   const jevDecision = normalizePersistedJevDecision(logCtx.jevDecision);
+  // Keyed by the live attempt objects, not the detached copies above.
+  const protocolTrace = protocolTraceForRequest(logCtx, logCtx.attempts);
   addLog({
     requestId,
     ...(isLogicalRequestId(logicalRequestId) ? { logicalRequestId } : {}),
@@ -1580,6 +1591,7 @@ export function addFinalRequestLog(
     ...(logCtx.routeDecision ? { routeDecision: logCtx.routeDecision } : {}),
     ...(jevDecision ? { jevDecision } : {}),
     ...(claudeCompatibility ? { claudeCompatibility } : {}),
+    ...(protocolTrace ? { protocolTrace } : {}),
     ...attribution,
   });
   // Formatted from the finalized snapshot, so the ring shows exactly what the ledger holds.
@@ -1597,73 +1609,6 @@ export function addFinalRequestLog(
       extractedUsage: loggedUsage ?? null,
     });
   }
-}
-
-export function filterRequestLogs(logs: RequestLogEntry[], params: URLSearchParams): RequestLogEntry[] {
-  let filtered = logs;
-  const provider = params.get("provider")?.trim();
-  if (provider) {
-    filtered = filtered.filter(entry => entry.provider === provider
-      || entry.attempts?.some(attempt => attempt.provider === provider));
-  }
-  const conversationId = params.get("conversationId")?.trim() || params.get("conversation")?.trim();
-  if (conversationId) {
-    filtered = filtered.filter(entry => matchesLogConversationId(entry.conversationId, conversationId));
-  }
-  // #2704: there was no `model` clause at all, so `?model=x` was ACCEPTED and silently
-  // ignored -- worse than an error, because it yields wrong conclusions from output that
-  // looks correct. Attempts are matched for the same reason `provider` matches them: a
-  // request that failed over should be findable by the model that actually served it.
-  const model = params.get("model")?.trim();
-  if (model) {
-    filtered = filtered.filter(entry => entry.model === model
-      || entry.attempts?.some(attempt => attempt.model === model));
-  }
-  // #4057: "which account served this request" is the first question asked when one provider
-  // holds several accounts, and until now the only way to answer it was to grep usage.jsonl by
-  // hand. Attempts are matched for the same reason `provider` and `model` match them: when a
-  // request failed over between pool accounts, a search for the account that finally served it
-  // has to find that request, not only the account that first refused it.
-  const account = params.get("account")?.trim();
-  if (account) {
-    filtered = filtered.filter(entry => entry.accountLogLabel === account
-      || entry.attempts?.some(attempt => attempt.accountLogLabel === account));
-  }
-  const status = params.get("status")?.trim().toLowerCase();
-  if (status) {
-    filtered = /^[1-5]xx$/.test(status)
-      ? filtered.filter(entry => Math.floor(entry.status / 100) === Number(status[0]))
-      : filtered.filter(entry => String(entry.status) === status);
-  }
-  const tailRaw = params.get("tail")?.trim();
-  if (tailRaw) {
-    const tail = Number.parseInt(tailRaw, 10);
-    if (Number.isFinite(tail) && tail > 0) filtered = filtered.slice(-Math.min(tail, MAX_LOG_SIZE));
-  }
-  const offsetRaw = params.get("offset")?.trim();
-  const limitRaw = params.get("limit")?.trim();
-  if (limitRaw) {
-    const limit = Number.parseInt(limitRaw, 10);
-    const offset = offsetRaw ? Number.parseInt(offsetRaw, 10) : 0;
-    if (Number.isFinite(limit) && limit > 0) {
-      const capped = Math.min(limit, MAX_LOG_SIZE);
-      const startOffset = Number.isFinite(offset) && offset > 0 ? offset : 0;
-      const end = filtered.length - startOffset;
-      if (end <= 0) filtered = [];
-      else {
-        const begin = Math.max(0, end - capped);
-        filtered = filtered.slice(begin, end);
-      }
-    }
-  }
-  return filtered;
-}
-
-export function filteredRequestLogCount(logs: RequestLogEntry[], params: URLSearchParams): number {
-  const withoutPagination = new URLSearchParams(params);
-  withoutPagination.delete("limit");
-  withoutPagination.delete("offset");
-  return filterRequestLogs(logs, withoutPagination).length;
 }
 
 interface FinalizedUsageResult {
@@ -1766,20 +1711,6 @@ export function beginRequestAttempt(
   };
 }
 
-export function sealRequestAttemptIdentity(
-  attempt: PersistedUsageAttempt | undefined,
-  provider: string,
-  adapter: string,
-  accountLogLabel?: string,
-): void {
-  if (!attempt) return;
-  if (attempt.provider !== provider || attempt.adapter !== adapter) delete attempt.credentialSource;
-  attempt.provider = provider;
-  attempt.adapter = adapter;
-  if (isCodexUsageAccountLogLabel(accountLogLabel)) attempt.accountLogLabel = accountLogLabel;
-  else delete attempt.accountLogLabel;
-}
-
 /** Preserve metered JSON failures before key recovery consumes/cancels their body. */
 export async function recordKeyAttemptFailure(logCtx: RequestLogContext, response: Response, signal?: AbortSignal): Promise<void> {
   const attempt = logCtx.activeAttempt;
@@ -1823,8 +1754,7 @@ export function noteProviderAttemptSend(
   stampApiKeyAccountLabel(logCtx, providerName, provider);
   const next = logCtx.accountLogLabel;
   if (attempt && usesApiKeyAccount(provider)) keyUsageOwners.add(attempt);
-  if (attempt && attempt.sendCount > 0 && previous !== next
-    && (KEY_ACCOUNT_LOG_LABEL_RE.test(previous ?? "") || KEY_ACCOUNT_LOG_LABEL_RE.test(next ?? ""))) {
+  if (attempt && attempt.sendCount > 0 && attemptAccountChanged(previous, next, attempt.provider, logCtx.provider)) {
     // An input estimate is not evidence that a failed send used that many tokens.
     delete attempt.inputTokenEstimate;
     finishRequestAttempt(attempt, attempt.status >= 100 ? attempt.status

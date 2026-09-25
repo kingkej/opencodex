@@ -37,6 +37,7 @@ import {
   type JevDecision,
 } from "../../combos";
 import { formatErrorResponse } from "../../bridge";
+import { SEND_BUDGET_EXHAUSTED_CODE } from "../../lib/errors";
 import {
   expandPreviousResponseInput,
   previousResponseReplayFailure,
@@ -84,6 +85,9 @@ import {
 import { preflightComboStreamResponse } from "./combo-stream-preflight";
 import { streamingContextOverflowResponse, jsonContextOverflowResponse } from "./context-overflow";
 import { mandatoryResponsesReasoningReplayUnavailable } from "./core-replay";
+import { settleOperatorReplacement } from "../../lib/upstream-retry";
+import { createComboProtocolLanes, dispatchNativeComboChild } from "./core-combo-native";
+import { clientWireOf } from "../inference/client-wire";
 
 /**
  * Sends one combo target may run on its own before the ladder moves on. A target is a whole
@@ -225,10 +229,17 @@ function eligibleJevComboChoices(
       },
     });
   }
+  // #5691: the synchronous pick above does not defer emergency-only targets, so apply the
+  // same rule here — withhold them from JEV while any normal target is offered, never when
+  // they are all that remains.
+  if (combo.cooldownWaitPolicy === "before-last-resort" && choices.some(choice => !choice.pick.target.lastResort)) {
+    return choices.filter(choice => !choice.pick.target.lastResort);
+  }
   return choices;
 }
 
 
+/** Dispatch a Responses combo within its shared send budget and preserve terminal child failures. */
 export async function executeComboResponses(
   req: Request,
   rawBody: unknown,
@@ -251,6 +262,17 @@ export async function executeComboResponses(
   if (!combo) {
     return formatErrorResponse(404, "invalid_request_error", `Unknown combo: ${comboId}`);
   }
+  // PF-07: present only for a Chat combo with `nativeChatCombos` on; otherwise every child
+  // takes the bridge below exactly as before.
+  const protocolLanes = createComboProtocolLanes({
+    source: options.protocolSource,
+    req,
+    config,
+    logCtx,
+    admission: options.admission,
+    comboId,
+    targets: combo.targets,
+  });
   // The ladder's own scope, derived from what this combo DECLARES. It shares the request-wide
   // counter with the holder that arrived on options -- a combo child already inherited that
   // counter, but nothing read it as a limit across targets -- while its transition and
@@ -361,7 +383,8 @@ export async function executeComboResponses(
   const targetEligible = (target: (typeof combo.targets)[number]): boolean =>
     (combo.strategy !== "jev" || target.provider !== JEV_PROVIDER_ID)
     && payloadEligible(target)
-    && reasoningReplayEligible(target);
+    && reasoningReplayEligible(target)
+    && (protocolLanes?.pickable(target) ?? true);
   const onlyReplayIncompatibleTargetsRemain = (excluded: Iterable<string> = []): boolean => {
     const excludedKeys = new Set(excluded);
     const remaining = combo.targets.filter(target => {
@@ -461,6 +484,9 @@ export async function executeComboResponses(
   }
 
   if (!pick) {
+    // Every enabled candidate skipped as unrepresentable: the ingress refusal, with no send.
+    const protocolRefusal = protocolLanes?.refusal();
+    if (protocolRefusal) return protocolRefusal;
     if (onlyReplayIncompatibleTargetsRemain()) return targetIncompatibleResponse();
     return options.abortSignal?.aborted
       ? clientCancelledResponse()
@@ -579,13 +605,17 @@ export async function executeComboResponses(
       countedExternally: true,
     });
     if (hopDecision && hopDecision.allowed) hopDecision.permit.use();
-    else if (hopDecision && !firstComboTarget) {
+    else if (hopDecision && firstComboTarget) {
+      // A refused initial reservation authorizes no child send and has no upstream failure to return.
+      return formatErrorResponse(429, SEND_BUDGET_EXHAUSTED_CODE, "request send budget exhausted before combo dispatch");
+    }
+    else if (hopDecision) {
       // Out of budget is not this target's failure. The established exhaustion contract is to
       // return the last real upstream answer with its status, headers and any quota body
       // intact rather than to mint a synthetic error, and a later target only exists because
       // an earlier one already recorded one.
       if (lastFailedChildLog) adoptFailedChildLog(lastFailedChildLog);
-      break;
+      return lastFailure!;
     }
     const targetSendBudget = comboSendScope
       ? comboTargetSendBudget(comboSendScope, combo.targets.length - 1 - comboTargetsDispatched)
@@ -700,8 +730,31 @@ export async function executeComboResponses(
           && targetEligible(target)
           && !isComboTargetInCooldown(comboId, target),
         );
-      response = await requestDispatchers.handleResponses(childRequest, config, childLog, {
+      const nativeChild = protocolLanes?.nativeChild(pick.target, targetRoute, targetSendBudget);
+      response = nativeChild ? await dispatchNativeComboChild({
+        source: options.protocolSource!,
+        plan: nativeChild,
+        logCtx,
+        childLog,
+        attempt,
+        startedAt: started,
+        ...(options.turnAdmissionLease ? { turnAdmissionLease: options.turnAdmissionLease } : {}),
+        // Attempt-relative TTFT, recorded here for the same reason as the bridge child below.
+        onFirstOutput: () => {
+          if (attempt.firstOutputMs === undefined) {
+            attempt.firstOutputMs = Math.max(0, Date.now() - started);
+          }
+          options.onFirstOutput?.();
+        },
+        callbacks: {
+          onTerminal: callbackGate.onTerminal,
+          onCancel: callbackGate.onCancel,
+          onResponseComplete: callbackGate.onResponseComplete,
+        },
+      }) : await requestDispatchers.handleResponses(childRequest, config, childLog, {
         ...options,
+        // A bridge child is a concrete route; the native source belongs to this loop only.
+        ...(options.protocolSource ? { protocolSource: undefined } : {}),
         // After the spread: the child must run on THIS target's ladder, not on the holder the
         // parent arrived with.
         sendBudget: targetSendBudget,
@@ -741,7 +794,9 @@ export async function executeComboResponses(
       return clientCancelledResponse();
     }
 
-    if (response.ok && !runTurnAdapterSseResponses.has(response)) {
+    // A native Chat child reports a pre-stream failure by status before any byte, so its body
+    // is never peeked; a non-OK one takes the ordinary failure path below.
+    if (response.ok && !runTurnAdapterSseResponses.has(response) && clientWireOf(response) !== "chat") {
       const nativePassthrough = isNativePassthroughSseResponse(response);
       const eagerRelay = isEagerRelaySseResponse(response);
       let preflight;
@@ -829,9 +884,20 @@ export async function executeComboResponses(
     attemptRetained = true;
     lastFailure = failure.response;
     lastFailedChildLog = childLog;
+    // A replacement that answers 200 is unmarked, and its zero-output failure only exists once
+    // preflight has rebuilt the stream as a fresh Response. A spent grant never hops: a status the
+    // client would resend becomes the refusal, and anything else reaches the client as it is.
+    const spentReplacement = !failure.nonReplayable && comboSendScope?.ambiguousResendSpent === true;
+    if (spentReplacement) {
+      const settled = settleOperatorReplacement(failure.response);
+      if (settled !== failure.response) {
+        adoptFailedChildLog(childLog);
+        return settled;
+      }
+    }
     // A non-replayable failure (the answer to a spent ambiguous-reset replacement) may follow a
     // send that already ran the turn, so no later target may receive it, whatever its status says.
-    const failureDecision = failure.nonReplayable
+    const failureDecision = failure.nonReplayable || spentReplacement
       ? "stop"
       : comboFailureDecision(failure.response.status, failure.classificationText, {
         code: failure.upstreamCode,

@@ -265,8 +265,8 @@ See [Codex prompt layers](/guides/codex-prompt/) for the layer model and the key
 | `GET, POST /api/windows-tray` | Read Windows tray state or install/start/stop/uninstall it | 400 unsupported platform/action; 500 operation failure |
 | `GET /api/diagnostics/project-config` | Read cached project configuration warnings | — |
 | `POST /api/sync` | Sync the current model catalog into Codex | 500 failed sync |
-| `GET /api/update/check` | Check the `latest` or `preview` update channel | 400 invalid tag |
-| `POST /api/update/run` | Start an update job, optionally followed by restart | 400 invalid body; job-specific conflict/error status |
+| `GET /api/update/check` | Asynchronously check the `latest` or `preview` package channel and refresh the package cache on success | 400 invalid tag |
+| `POST /api/update/run` | Asynchronously check a fresh package version, then start an update job, optionally followed by restart | 400 invalid body; job-specific conflict/error status |
 | `GET /api/update/status` | Poll an update job by id | 404 unknown job |
 | `GET, PUT /api/sidecar-settings` | Read or update web-search and vision sidecar model/backend settings | 400 invalid shape, backend, or limit |
 | `GET, PUT /api/shadow-call-settings` | Read or update shadow-call interception settings | 400 invalid shape or value |
@@ -526,6 +526,31 @@ outcome fields from an older server do not establish successful recovery.
 Credential list responses are deliberately masked. OAuth access tokens and complete provider API
 keys are not returned to dashboard clients.
 
+### Protocol paths
+
+| Method and path | Purpose | Notable errors |
+| --- | --- | --- |
+| `GET /api/protocols` | Return the protocol contract version, which APIs are served, the protocol settings, the current policy revision, and the request features a preview understands | — |
+| `GET /api/protocols?provider=<name>` | The same body plus `provider`: `{ name, adapter, adapterSource, authMode, upstream, modelOverrides: [{ model, adapter, source }] }` — the wire the provider receives and who decided it (`hard-pin`, `operator`, `registry`, `provider-default`), with up to 64 models on a different wire (`modelOverridesTruncated: true` past that). No credential or base URL | 400 empty, repeated, over 200 characters, or control characters; 404 no provider with that name |
+| `POST /api/protocols/plan` | Preview the path a request would take: `{ "model": "...", "inbound": "responses" \| "chat" \| "messages", "features": [...] }` returns each route candidate's request and response path, delivery mode, fidelity, feature effects, and reasons | 400 invalid JSON, unknown field, model over 200 characters, unknown inbound, or more than 24 / unknown features |
+| `PATCH /api/protocols/settings` | Change protocol settings: `{ "messagesEnabled"?: boolean, "unrepresentable"?: "legacy" \| "reject", "rollout"?: { ...boolean switches } }`. Returns the same body as `GET /api/protocols`. Closing Messages also sets `claudeCode.enabled` to `false` in the same save; opening it writes only `apiSurfaces.messages.enabled` | 400 invalid JSON, empty body, unknown field, wrong type, or `rollout.managedMessagesNativeOAuth` without `rollout.managedMessagesNative`; 409 configuration busy; 500 save failed (nothing changes) |
+
+A preview is computed from configuration alone. It sends nothing to any provider, costs nothing,
+does not advance combo rotation, and is not logged. The API page in the dashboard shows the same
+preview under **Request path preview**. A delivery mode of `native` describes how the request
+travels; it is not a compatibility verification.
+
+The `?provider=` form backs the **Upstream wire** section of a provider's settings. It reports
+the format opencodex sends to that provider; it does not open or close any client API. To change
+the provider-wide adapter, save the provider's settings as usual (`PATCH /api/providers`).
+
+`PATCH /api/protocols/settings` is the only writer here and backs the Messages toggle on the
+API page. The CLI drives these routes with `ocx api protocols`, `ocx api explain` and
+`ocx api policy`. The rollout switches are staged and default off
+([Protocol paths](/guides/protocol-paths/#rollout-switches)); see
+[API surfaces](/reference/configuration/server/#api-surfaces-apisurfaces) for how the Messages
+setting interacts with `claudeCode.enabled` across upgrades and downgrades.
+
 ### Providers
 
 | Method and path | Purpose | Notable errors |
@@ -561,7 +586,12 @@ deleting their provider.
 | --- | --- | --- |
 | `GET /api/github/star` | Read repository star status through the user's `gh` session | Status-specific fixed result codes |
 | `POST /api/github/star` | Star the repository only from an authenticated human action | 403 `agent_consent_required` for agent-driven callers without dashboard-session evidence |
-| `GET /api/update/badge` | Read the cheap sidebar update-badge state | — |
+| `GET /api/update/badge` | Read cached package badge without a registry lookup; missing, wrong-channel or 40-hour-old cache returns `unknown: true`. `surface=desktop&session=<id>` reads only that desktop app session. | 400 invalid surface; missing or expired desktop session returns `unknown: true` |
+| `POST /api/update/desktop-snapshot` | Desktop shell publishes its Tauri-updater display state through the bound proxy client | 403 if an `Origin` header is present or the principal is not the raw `admin-token`; 400 invalid fields; 413 over 1 KiB |
+
+The desktop snapshot is temporary display state, not an install request. The proxy stores at most 32 sessions in memory and expires one 180 seconds after its last heartbeat. A normal browser without surface=desktop continues to read the package badge.
+
+The proxy checks an eligible package install after startup when its cache is missing or older than 20 hours, and checks freshness hourly. Set `OCX_DISABLE_UPDATE_CHECK=1` to disable automatic checks. Explicit check and run requests still work.
 
 :::caution
 Management authentication proves access to the proxy; it does not prove consent to spend the

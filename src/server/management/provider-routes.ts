@@ -43,6 +43,8 @@ import { providerDestinationResolvedError } from "../../lib/destination-policy";
 import { reconcileLiveStateStores } from "../../lib/state-store-registrations";
 import { ProviderOutboundPolicyError, providerOutboundGet, providerOutboundPost, providerRedirectError } from "../../lib/provider-outbound";
 import { fetchCursorUsableModels } from "../../adapters/cursor/live-models";
+import { fetchDevinUsableModels } from "../../adapters/devin/live-models";
+import { resolveDevinApiBaseUrl } from "../../oauth/devin/api-base";
 import { fetchQoderModels } from "../../adapters/qoder/live-models";
 import { resolveQoderProfile } from "../../adapters/qoder/profiles";
 import { parseAntigravityAvailableModels } from "../../providers/antigravity-models";
@@ -447,6 +449,13 @@ function applyProviderPatchFields(
     } else {
       return { error: "annotateEmptyToolOutputs must be a boolean or null" };
     }
+    touched = true;
+  }
+  if (Object.hasOwn(rawBody, "fastEnabled")) {
+    const value = rawBody.fastEnabled;
+    if (value === null) delete next.fastEnabled;
+    else if (typeof value === "boolean") next.fastEnabled = value;
+    else return { error: "fastEnabled must be a boolean or null" };
     touched = true;
   }
   if (Object.hasOwn(rawBody, "xaiResponsesOptIn")) {
@@ -935,12 +944,15 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
       retainModels: p.retainModels,
       omitReasoningEffortWithToolsModels: p.omitReasoningEffortWithToolsModels,
       upstreamHttpVersion: p.upstreamHttpVersion,
-      upstreamWebsocket: p.upstreamWebsocket === true,
+      // As configured: unset on canonical `openai` means upstream WebSocket, so never coerce to false.
+      upstreamWebsocket: p.upstreamWebsocket,
       authMode: p.authMode,
       apiKeyTransport: p.apiKeyTransport,
       disabled: p.disabled === true,
       codexAccountMode: providerCodexAccountMode(name, p),
       ...(name === "xai" ? { xaiResponsesOptInState: xaiResponsesOptInState(p) } : {}),
+      // Only opt-in Fast lanes (Anthropic fast mode bills usage credits) get a dashboard switch.
+      ...(getProviderRegistryEntry(name)?.fastOptIn === true ? { fastOptIn: { enabled: p.fastEnabled === true } } : {}),
       discovery: p.liveModels === false ? undefined : getProviderDiscoveryStatus(name),
       ...(name === "openai" && isCanonicalOpenAiForwardProvider(p)
         ? { entitlement: getCodexModelEntitlementStatus(config) }
@@ -1204,6 +1216,7 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     const submittedModelDisplayNames = Object.hasOwn(prov, "modelDisplayNames");
     const submittedRequestPacing = Object.hasOwn(prov, "requestPacing");
     const submittedUpstreamWebsocket = Object.hasOwn(prov, "upstreamWebsocket");
+    const submittedFastEnabled = Object.hasOwn(prov, "fastEnabled");
     // Same trap, one more field: DeepSeek carries a registry default of `true` for
     // annotateEmptyToolOutputs, so enrichment cannot distinguish "the client omitted it"
     // from "the registry supplied it" either. Without this sample, an unrelated edit that
@@ -1278,6 +1291,10 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     if (!submittedUpstreamWebsocket && existing?.upstreamWebsocket !== undefined) {
       prov.upstreamWebsocket = existing.upstreamWebsocket;
     }
+    // The Models-page Fast switch is PATCH-owned and the provider form never sends it, so an
+    // unrelated full save must not silently turn an opted-in Anthropic Fast lane back off.
+    const liveFastEnabled = config.providers[name]?.fastEnabled;
+    if (!submittedFastEnabled && liveFastEnabled !== undefined) prov.fastEnabled = liveFastEnabled;
     // The form sends none of the compatibility settings either (#5563). Read the live row rather
     // than `existing`, like the alias overlays below: a PATCH that saved one of them while DNS
     // validation awaited must not be undone. Nothing is carried to a new destination.
@@ -1632,10 +1649,10 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     }
     const { buildModelsRequest, getValidAccessTokenSnapshot, resolveModelsAuthToken } = await import("../../oauth");
     const antigravity = effectiveGoogleMode(name, prov) === "cloud-code-assist";
-    const snapshot = antigravity
+    const snapshot = prov.authMode === "oauth"
       ? await getValidAccessTokenSnapshot(name).catch(() => undefined)
       : undefined;
-    const apiKey = snapshot?.accessToken ?? await resolveModelsAuthToken(name, prov);
+    const apiKey = prov.authMode === "oauth" ? snapshot?.accessToken : await resolveModelsAuthToken(name, prov);
     if (prov.authMode === "oauth" && !apiKey) {
       return jsonResponse({ ok: false, latencyMs: 0, error: "static catalog only — upstream not verified (not logged in)" });
     }
@@ -1658,6 +1675,29 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
         latencyMs,
         models: live.models.length,
         message: `Connected. ${live.models.length} models.`,
+      });
+    }
+    if (prov.adapter === "devin") {
+      const started = Date.now();
+      const configuredBase = name === "devin" ? getProviderRegistryEntry(name)?.baseUrl ?? prov.baseUrl : prov.baseUrl;
+      const destination = resolveDevinApiBaseUrl(snapshot?.apiBaseUrl ?? configuredBase);
+      const liveResult = await fetchDevinUsableModels({
+        apiKey: apiKey ?? "",
+        baseUrl: destination,
+      });
+      const latencyMs = Date.now() - started;
+      if (!liveResult.ok) {
+        return jsonResponse({
+          ok: false,
+          latencyMs,
+          error: `devin discovery ${liveResult.error}${liveResult.detail ? `: ${liveResult.detail}` : ""}`,
+        });
+      }
+      return jsonResponse({
+        ok: true,
+        latencyMs,
+        models: liveResult.models.length,
+        message: `Connected. ${liveResult.models.length} models.`,
       });
     }
     if (prov.adapter === "qoder") {
@@ -1686,7 +1726,9 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     if (antigravity && !project) {
       return jsonResponse({ ok: false, latencyMs: 0, error: "Antigravity project unavailable — re-run `ocx login google-antigravity`" });
     }
-    const { method, url: modelsUrl, headers } = buildModelsRequest(prov, apiKey, name);
+    const { method, url: modelsUrl, headers } = buildModelsRequest(prov, apiKey, name, {
+      oauthApiBaseUrl: snapshot?.apiBaseUrl,
+    });
     const discovery = resolveProviderModelDiscovery(name, prov);
     const started = Date.now();
     try {

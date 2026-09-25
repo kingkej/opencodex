@@ -18,6 +18,7 @@ import { ComboCapabilities, EffortSelect, StrategySeg, TargetEditor } from "./co
 import { COMBO_STRATEGY_HINT_KEYS, COMBO_TARGETS_HINT_KEYS } from "../combo-workspace-data";
 import { clampedNumberInput } from "./combo-workspace-utils";
 import { JevStatsPanel } from "./jev-stats-panel";
+import { ComboProtocolPlan } from "./protocols/ComboProtocolPlan";
 
 type DetailTab = "config" | "stats" | "about";
 
@@ -33,7 +34,7 @@ const detailTabDomId = (tab: DetailTab) => `cws-detail-tab-${tab}`;
 const detailPanelDomId = (tab: DetailTab) => `cws-detail-panel-${tab}`;
 
 export function DetailPanel({
-  apiBase = "",
+  apiBase,
   baseline,
   isCreate = false,
   otherIds,
@@ -48,6 +49,7 @@ export function DetailPanel({
   onSave,
   onDirtyChange,
 }: {
+  /** Management API target; without it the candidate path preview is not offered and JEV stats use same-origin paths. */
   apiBase?: string;
   baseline: ComboItem;
   isCreate?: boolean;
@@ -386,6 +388,7 @@ export function DetailPanel({
             />
           </div>
         )}
+        {!isCreate && apiBase !== undefined && <ComboProtocolPlan apiBase={apiBase} model={baseline.model} dirty={dirty} />}
       </div>
 
       {!isCreate && baseline.strategy === "jev" && (
@@ -396,7 +399,7 @@ export function DetailPanel({
           aria-labelledby={detailTabDomId("stats")}
           hidden={tab !== "stats"}
         >
-          <JevStatsPanel apiBase={apiBase} comboId={baseline.id} active={tab === "stats"} />
+          <JevStatsPanel apiBase={apiBase ?? ""} comboId={baseline.id} active={tab === "stats"} />
         </div>
       )}
 

@@ -19,7 +19,7 @@ export type ModelOption = {
 export type ComboAddIntent = "blank" | "jev-auto";
 
 export interface ComboWorkspaceProps {
-  /** Management API prefix used by optional detail resources such as JEV stats. */
+  /** Management API target; enables the per-candidate path preview and JEV stats in the detail panel. */
   apiBase?: string;
   combos: ComboItem[];
   providerQuotaStates: ProviderQuotaStates;

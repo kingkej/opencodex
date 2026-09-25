@@ -82,7 +82,7 @@ test("GET /api/claude-code returns defaults + available + aliases", async () => 
     expect(d.modelMap).toEqual({});
     expect(d.available).toContain("mock/test-model");
     // Aliases preview uses the readable CLI-surface family (devlog 050 / audit 051 #2).
-    expect(d.aliases.some((a: { id: string }) => a.id === "claude-ocx-mock--test-model")).toBe(true);
+    expect(d.aliases.some((a: { id: string }) => a.id === "ocx-claude-mock--test-model")).toBe(true);
     expect(typeof d.port).toBe("number");
   } finally {
     await server.stop(true);
@@ -379,6 +379,50 @@ test("authMode-only PUT triggers system-env reconciliation (audit R2 #1)", async
     });
     expect(r.status).toBe(200);
     expect(applySpy).toHaveBeenCalled();
+  } finally {
+    applySpy.mockRestore();
+    await server.stop(true);
+  }
+});
+
+// Model-slot and lever fields feed injectSystemEnv, so changing one must reconcile launchd too;
+// before, only systemEnv/authMode did, and a cleared smallFastModel stayed injected until restart.
+test.each([
+  ["smallFastModel", ""],
+  ["model", ""],
+  ["tierModels", { opus: "mock/test-model" }],
+  ["maxContextTokens", 1_000_000],
+  ["alwaysEnableEffort", true],
+  ["autoContext", false],
+  ["autoCompactWindow", 400_000],
+] as const)("%s-only PUT triggers system-env reconciliation", async (field, value) => {
+  const applySpy = spyOn(systemEnv, "applySystemEnvToggle").mockResolvedValue({ reverted: false, reason: "test" });
+  const server = startServer(0);
+  try {
+    const r = await fetch(new URL("/api/claude-code", server.url), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
+    expect(r.status).toBe(200);
+    expect(applySpy).toHaveBeenCalled();
+  } finally {
+    applySpy.mockRestore();
+    await server.stop(true);
+  }
+});
+
+test("a PUT that touches no system-env input does not reconcile launchd", async () => {
+  const applySpy = spyOn(systemEnv, "applySystemEnvToggle").mockResolvedValue({ reverted: false, reason: "test" });
+  const server = startServer(0);
+  try {
+    const r = await fetch(new URL("/api/claude-code", server.url), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blockedSkills: null }),
+    });
+    expect(r.status).toBe(200);
+    expect(applySpy).not.toHaveBeenCalled();
   } finally {
     applySpy.mockRestore();
     await server.stop(true);

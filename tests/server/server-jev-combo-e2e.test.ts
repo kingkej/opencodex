@@ -375,6 +375,32 @@ describe("JEV Combo runtime", () => {
     ]);
   });
 
+  test("withholds lastResort targets from JEV under before-last-resort only while a normal target is offered", async () => {
+    const criteriaFor = async (disableNormal: boolean): Promise<string[]> => {
+      const jevRequests: Array<Record<string, unknown>> = [];
+      const config = makeConfig({
+        jevFetch: choiceFetch("luna/gpt-5.6-luna:low", jevRequests),
+        ...(disableNormal ? { providerOverrides: { astra: { disabled: true }, sol: { disabled: true } } } : {}),
+      });
+      config.combos!.auto!.cooldownWaitPolicy = "before-last-resort";
+      config.combos!.auto!.targets = targetRows.map(target =>
+        target.provider === "luna" ? { ...target, lastResort: true } : { ...target });
+      expect((await execute(config, body => success(String(body.model)))).status).toBe(200);
+      const questions = jevRequests[0]?.questions as { route?: { criteria?: Record<string, unknown> } };
+      return Object.keys(questions.route?.criteria ?? {});
+    };
+
+    const withNormal = await criteriaFor(false);
+    expect(withNormal.some(key => key.startsWith("astra/"))).toBe(true);
+    expect(withNormal.some(key => key.startsWith("luna/"))).toBe(false);
+    // With no normal target reachable, the emergency target is still offered.
+    expect(await criteriaFor(true)).toEqual([
+      "luna/gpt-5.6-luna:low",
+      "luna/gpt-5.6-luna:medium",
+      "luna/gpt-5.6-luna:high",
+    ]);
+  });
+
   test("offers only each target's configured reasoning efforts and skips stale empty intersections", async () => {
     const jevRequests: Array<Record<string, unknown>> = [];
     const config = makeConfig({

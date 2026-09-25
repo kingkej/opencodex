@@ -18,7 +18,7 @@ import type { ComboWorkspaceProps } from "./combo-workspace-types";
 export type { ModelOption, ProviderOption, ComboWorkspaceProps } from "./combo-workspace-types";
 
 export default function ComboWorkspace({
-  apiBase = "",
+  apiBase,
   combos,
   providerQuotaStates,
   providers,
