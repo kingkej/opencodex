@@ -289,7 +289,12 @@ boolean image/tool signals may be sent to TypeSafe. It excludes the JEV credenti
 raw image bytes, tool arguments, encrypted reasoning, and full conversation history. Do not select
 `jev-auto` for content you do not want TypeSafe to process. Recognized OpenCodex machine-context
 envelopes are removed from all three text samples, but ordinary assistant and tool-output text is
-not a secret scanner and may still contain sensitive content. Logs contain only the selected
+not a secret scanner and may still contain sensitive content. TypeSafe states that Jev is not
+trained on customer requests, but its terms set no fixed retention period for submitted state and
+offer zero data retention only on enterprise plans
+([models](https://docs.typesafe.ai/models), [legal](https://docs.typesafe.ai/legal)). TypeSafe
+also documents English as Jev's most accurate language, so check decisions on non-English work
+before relying on them. Logs contain only the selected
 target/effort, a coarse decision gate, latency, optional confidence/probability, and numeric usage.
 Automated tests use mocked TypeSafe responses plus a no-key fail-open smoke; a live TypeSafe decision
 requires an operator-supplied key and is not run implicitly.
