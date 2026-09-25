@@ -123,6 +123,7 @@ describe("combo-workspace-data", () => {
         targets: [{ provider: "openai", model: "gpt-6-astra" }],
         strategy: "jev",
         defaultEffort: null,
+        imageInput: "auto",
         reasoningEffortMode: "adaptive",
         alias: "jev-auto",
       },
