@@ -373,3 +373,9 @@ gérer un refus de politique ou corriger l’origine de la demande rejetée. Les
 Exception aux erreurs 400 terminales : un rejet structuré de `user`, une valeur non prise en charge pour `reasoning.effort`/`reasoning_effort`, ou un rejet d’entrée d’image propre à un modèle (`param: input`) peut faire passer le combo à la cible admissible suivante avant le début de la sortie, sans délai de refroidissement. Le refus de sécurité, l’annulation et une sortie déjà commencée restent non rejouables.
 
 [Canonical compatibility details](/guides/combos/#request-local-target-compatibility).
+
+## Cloudflare Clef
+
+La stratégie `clef` utilise Cloudflare Clef via OpenRouter pour choisir une cible disponible et un effort de raisonnement. Configurez une clé OpenRouter, puis créez un Combo distinct avec `strategy: "clef"` et l’alias `clef-auto`. Le modèle choisi exécute la tâche. Les erreurs de décision utilisent la première cible disponible ; les erreurs d’exécution suivent le repli normal. Stats affiche les décisions pour ce Combo. OpenRouter reçoit un échantillon limité du contexte et les notes des modèles.
+
+[Clef API](/guides/combos/#clef-decision-guided-first-pick).

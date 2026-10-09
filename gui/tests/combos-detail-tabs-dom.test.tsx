@@ -149,7 +149,7 @@ test("roving tabindex keeps the tablist to one tab stop", async () => {
   }
 });
 
-test("an existing JEV combo exposes a lazy Stats tab", async () => {
+test.each(["jev", "clef"] as const)("an existing %s combo exposes a lazy Stats tab with its own service label", async strategy => {
   const { createRoot } = await import("react-dom/client");
   const originalFetch = globalThis.fetch;
   const requests: string[] = [];
@@ -158,7 +158,7 @@ test("an existing JEV combo exposes a lazy Stats tab", async () => {
     value: async (input: RequestInfo | URL) => {
       requests.push(String(input));
       return Response.json({
-        range: "30d", comboId: "jev-auto", generatedAt: 1,
+        range: "30d", comboId: `${strategy}-auto`, generatedAt: 1,
         summary: {
           decisions: 0, appliedDecisions: 0, failOpenDecisions: 0, successfulRequests: 0,
           requestsWithModelFallback: 0, modelAttempts: 0, measuredModelAttempts: 0,
@@ -181,7 +181,7 @@ test("an existing JEV combo exposes a lazy Stats tab", async () => {
       root.render(
         <LanguageProvider>
           <DetailPanel
-            baseline={{ ...emptyDraft("jev-auto"), strategy: "jev" }}
+            baseline={{ ...emptyDraft(`${strategy}-auto`), strategy }}
             otherIds={[]}
             otherAliases={[]}
             providerMap={{}}
@@ -202,7 +202,8 @@ test("an existing JEV combo exposes a lazy Stats tab", async () => {
     await act(async () => { container.querySelector<HTMLButtonElement>("#cws-detail-tab-stats")!.click(); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toContain("comboId=jev-auto");
+    expect(requests[0]).toContain(`comboId=${strategy}-auto`);
+    expect(container.textContent).toContain(strategy === "clef" ? "No Clef decisions yet" : "No JEV decisions yet");
   } finally {
     await act(async () => root.unmount());
     clearClientResourceStoresForTests();

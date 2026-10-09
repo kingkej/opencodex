@@ -1,7 +1,7 @@
 /**
  * Dashboard load -> save must not rewrite a combo's strategy.
  *
- * The runtime and management API accept six strategies. The GUI parser used to
+ * The runtime and management API accept the configured strategies. The GUI parser used to
  * collapse random/least-used/reset-window to failover, so saving an untouched
  * combo silently rewrote its strategy (and stripped weights for random).
  */
@@ -15,6 +15,7 @@ const strategies = [
   "least-used",
   "reset-window",
   "jev",
+  "clef",
 ] as const;
 
 function payloadWith(strategy: unknown, weight?: number) {
@@ -85,5 +86,6 @@ test("groupCombos keeps non-primary strategies in their own bucket", () => {
     "least-used",
     "reset-window",
     "jev",
+    "clef",
   ]);
 });

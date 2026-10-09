@@ -412,3 +412,9 @@ reddedilen istek kaynağını düzeltin. Kombolar bu durumlar için atlama yapma
 Sonlandırıcı 400 hatalarının dar bir istisnası vardır: `user` alanını açıkça reddeden, `reasoning.effort`/`reasoning_effort` için desteklenmeyen değer bildiren veya modele özgü görüntü girdisini reddeden (`param: input`) yapılandırılmış hata, çıktı başlamadan önce sonraki uygun hedefe geçebilir. Bu uyumsuzluk için bekleme süresi kaydedilmez. Güvenlik politikası reddi, iptal ve başlamış çıktı yeniden yürütülmez.
 
 [Canonical compatibility details](/guides/combos/#request-local-target-compatibility).
+
+## Cloudflare Clef
+
+`clef` stratejisi, OpenRouter üzerinden Cloudflare Clef ile hedefi ve akıl yürütme düzeyini seçer. OpenRouter anahtarını ayarlayın ve `strategy: "clef"` ile `clef-auto` takma adını kullanan ayrı bir Combo oluşturun. Seçilen model görevi yürütür. Karar başarısızsa ilk uygun hedef kullanılır; yürütme hataları normal yedek geçişi izler. Stats bu Combo kararlarını gösterir. OpenRouter sınırlı bağlam ve model notlarını alır.
+
+[Clef API](/guides/combos/#clef-decision-guided-first-pick).

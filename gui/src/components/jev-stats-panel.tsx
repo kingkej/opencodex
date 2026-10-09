@@ -81,12 +81,15 @@ export function JevStatsPanel({
   apiBase,
   comboId,
   active,
+  service = "JEV",
 }: {
   apiBase: string;
   comboId: string;
   active: boolean;
+  service?: "JEV" | "Clef";
 }) {
-  const { t, locale } = useI18n();
+  const { t: translate, locale } = useI18n();
+  const t: typeof translate = (key, vars) => translate(key, { service, ...vars });
   const [range, setRange] = useState<JevStatsRange>("30d");
   const load = useCallback(async (signal: AbortSignal): Promise<JevStatsResponse> => {
     const query = new URLSearchParams({ jev: "1", comboId, range });

@@ -1,6 +1,7 @@
 import type { OcxComboDefaultEffort } from "../types";
 import type { PersistedUsageEntry } from "./log";
 import { usageDisplayTotalTokens } from "./totals";
+import { baseProviderLabel } from "../providers/label";
 
 export const JEV_DECISION_GATES = [
   "apply",
@@ -30,6 +31,8 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f]/u;
 
 export interface PersistedJevDecisionV1 {
   version: 1;
+  /** Absent on legacy JEV records. Clef is distinguished without a second log schema. */
+  service?: "clef";
   comboId: string;
   backend?: "typesafe" | "systemone" | "model";
   selected: {
@@ -187,6 +190,7 @@ export function normalizePersistedJevDecision(value: unknown): PersistedJevDecis
     : undefined;
   return {
     version: 1,
+    ...(value.service === "clef" ? { service: "clef" as const } : {}),
     comboId,
     ...(backend !== undefined ? { backend } : {}),
     selected: {
@@ -384,7 +388,8 @@ class StreamingJevStatsAccumulator implements JevStatsAccumulator {
       this.decisionTotalTokens = saturatingAdd(this.decisionTotalTokens, decision.usage.totalTokens);
     }
 
-    const selected = this.rowFor(decision.selected.provider, decision.selected.model);
+    const selectedProvider = baseProviderLabel(decision.selected.provider);
+    const selected = this.rowFor(selectedProvider, decision.selected.model);
     selected.picks = saturatingAdd(selected.picks, 1);
     if (decision.gate === "apply") selected.appliedPicks = saturatingAdd(selected.appliedPicks, 1);
     else selected.failOpenPicks = saturatingAdd(selected.failOpenPicks, 1);
@@ -396,11 +401,12 @@ class StreamingJevStatsAccumulator implements JevStatsAccumulator {
     const attempts = (entry.attempts ?? []).flatMap(attempt => {
       const sendCount = boundedCount(attempt.sendCount) ?? 0;
       if (sendCount === 0) return [];
-      const provider = boundedIdentity(attempt.provider, MAX_TARGET_IDENTITY_CHARS);
+      const identity = boundedIdentity(attempt.provider, MAX_TARGET_IDENTITY_CHARS);
+      const provider = identity ? baseProviderLabel(identity) : undefined;
       const model = boundedIdentity(attempt.model, MAX_TARGET_IDENTITY_CHARS);
       return provider && model ? [{ attempt, provider, model, sendCount }] : [];
     });
-    if (attempts.some(({ provider, model }) => provider !== decision.selected.provider
+    if (attempts.some(({ provider, model }) => provider !== selectedProvider
       || model !== decision.selected.model)) {
       this.requestsWithModelFallback = saturatingAdd(this.requestsWithModelFallback, 1);
     }

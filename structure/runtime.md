@@ -508,7 +508,7 @@ Regression coverage: `tests/responses/responses-forward-prompt-envelope.test.ts`
 
 ## Combo default effort precedence
 
-`src/combos/request.ts` keeps `reasoningEffortMode` and `defaultEffortMode` independent.
+`src/combos/request.ts` keeps `reasoningEffortMode` and `defaultEffortMode` independent. JEV and Clef select only the initial target/effort under the [decision provider contract](providers/jev-decision.md#cloudflare-clef-through-openrouter); later attempts use ordinary Combo fallback.
 The existing fifth argument remains the strict/adaptive capability-normalization policy;
 the optional sixth argument enables fallback/force precedence. Force requires a valid
 non-null default, overrides only valid caller effort on a known supported ladder, and

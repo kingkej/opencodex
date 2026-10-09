@@ -116,3 +116,23 @@ detection, and folds identities beyond 255 concrete rows into one explicit overf
 preserving global totals. Up to four JEV projections participate in the same app-owned memory budget
 and eviction path as ordinary usage aggregates. Read failure returns HTTP 500 rather than a partial
 projection.
+
+### Cloudflare Clef through OpenRouter
+
+The `clef` Combo strategy uses the same bounded state, eligible target/effort map, strict answer
+parser, four-second deadline and ordinary child fallback as JEV. `src/combos/clef.ts` resolves its credential destination before extraction, including the parent admission scope. Clef retains the four-second deadline and ignores JEV backend settings. Its decision request is fixed to
+`https://openrouter.ai/api/alpha/decisions` with model `cloudflare/clef`. The configured `openrouter`
+key is consumed only from a canonical OpenRouter Chat transport with key auth; the explicit
+`OPENROUTER_API_KEY` fallback also goes only to that fixed endpoint. Disabled OpenRouter rows
+suppress the decision request. Custom destination credentials and JEV credentials are never reused.
+OpenRouter receives only the bounded decision state and question schema, not the full model request.
+
+Clef Combos publish ordinary aliases such as `clef-auto`; the execution target still performs the
+user's task. Their editor exposes the same target allowlists and lazy Stats tab, labeled Clef.
+Stats fold physical account-pool suffixes through the shared provider-label authority before
+joining picks and usage, so account rotation is not counted as a model fallback.
+For backwards compatibility the bounded persisted record remains `jevDecision`, with `backend: "systemone"` and optional
+`service: "clef"`; legacy JEV records omit that field. The shared usage projection is keyed by Combo,
+so selecting a Clef Combo's Stats tab separates its decision and physical model usage from JEV.
+Regression coverage exercises credential destination ownership, exact effort choices, telemetry
+normalization, and one-decision child fallback in the Clef routing and server tests.

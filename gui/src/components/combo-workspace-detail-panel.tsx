@@ -76,7 +76,7 @@ export function DetailPanel({
 }) {
   const t = useT();
   const [tab, setTab] = useState<DetailTab>("config");
-  const detailTabs = !isCreate && baseline.strategy === "jev" ? JEV_DETAIL_TABS : DETAIL_TABS;
+  const detailTabs = !isCreate && (baseline.strategy === "jev" || baseline.strategy === "clef") ? JEV_DETAIL_TABS : DETAIL_TABS;
 
   /*
    * Arrow/Home/End traversal, matching ProviderDetails. Without it the tablist is two
@@ -416,7 +416,7 @@ export function DetailPanel({
         {!isCreate && apiBase !== undefined && <ComboProtocolPlan apiBase={apiBase} model={baseline.model} dirty={dirty} />}
       </div>
 
-      {!isCreate && baseline.strategy === "jev" && (
+      {!isCreate && (baseline.strategy === "jev" || baseline.strategy === "clef") && (
         <div
           className="combos-workspace-tab-content"
           role="tabpanel"
@@ -424,7 +424,7 @@ export function DetailPanel({
           aria-labelledby={detailTabDomId("stats")}
           hidden={tab !== "stats"}
         >
-          <JevStatsPanel apiBase={apiBase ?? ""} comboId={baseline.id} active={tab === "stats"} />
+          <JevStatsPanel apiBase={apiBase ?? ""} comboId={baseline.id} active={tab === "stats"} service={baseline.strategy === "clef" ? "Clef" : "JEV"} />
         </div>
       )}
 

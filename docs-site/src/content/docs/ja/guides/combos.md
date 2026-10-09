@@ -272,3 +272,9 @@ ocx combo remove <id> --yes
 通常の 400 エラーは終了扱いですが、`user` の明示的な拒否、`reasoning.effort`/`reasoning_effort` の非対応値、またはモデル固有の画像入力拒否（`param: input`）を示す構造化エラーでは、出力開始前に次の適格なターゲットへ進めます。この不一致ではクールダウンを記録しません。安全ポリシーによる拒否、キャンセル、出力開始後の再実行は禁止のままです。
 
 [Canonical compatibility details](/guides/combos/#request-local-target-compatibility).
+
+## Cloudflare Clef
+
+`clef` 戦略は OpenRouter 経由の Cloudflare Clef に対象と推論強度の選択を依頼します。OpenRouter のキーを設定し、`strategy: "clef"` とエイリアス `clef-auto` を持つ別の Combo を作成します。選択されたモデルがタスクを実行します。決定に失敗すると最初の利用可能な対象を使用し、実行時の失敗は通常のフォールバックで処理します。Stats はこの Combo の決定を表示します。OpenRouter には制限されたコンテキストとモデルのメモが送信されます。
+
+[Clef API](/guides/combos/#clef-decision-guided-first-pick).

@@ -161,11 +161,12 @@ export function TargetEditor({
   providerQuotaStates: ProviderQuotaStates;
   onChange: (next: ComboTarget[]) => void;
 }) {
-  const t = useT();
+  const translate = useT();
+  const t: typeof translate = (key, vars) => translate(key, { service: strategy === "clef" ? "Clef" : "JEV", serviceProvider: strategy === "clef" ? "OpenRouter" : "TypeSafe", ...vars });
   const provs = enabledProviders(providers);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
-  const failOpenIndex = strategy === "jev"
+  const failOpenIndex = (strategy === "jev" || strategy === "clef")
     ? targets.findIndex((target) => {
         const provider = providers.find(candidate => candidate.name === target.provider.trim());
         return !!target.provider.trim()
@@ -231,7 +232,7 @@ export function TargetEditor({
           <div
             className={[
               "cwi-target-row",
-              strategy === "failover" || strategy === "jev" ? "cwi-target-row--failover" : "",
+              strategy === "failover" || (strategy === "jev" || strategy === "clef") ? "cwi-target-row--failover" : "",
               dragging ? "cwi-target-row--dragging" : "",
               dropTarget ? "cwi-target-row--drop" : "",
             ].filter(Boolean).join(" ")}
@@ -354,7 +355,7 @@ export function TargetEditor({
               </button>
             </div>
           </div>
-          {strategy === "jev" && (
+          {(strategy === "jev" || strategy === "clef") && (
             <div className="cwi-jev-target-meta">
               {index === failOpenIndex && <span className="chip">{t("cws.jev.failOpen")}</span>}
               {selectableReasoningEfforts === undefined

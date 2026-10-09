@@ -180,8 +180,9 @@ export function comboConfigIssues(
     && body.strategy !== "random"
     && body.strategy !== "least-used"
     && body.strategy !== "reset-window"
-    && body.strategy !== "jev") {
-    issues.push({ path: ["strategy"], message: 'strategy must be "failover", "round-robin", "random", "least-used", "reset-window", or "jev"' });
+    && body.strategy !== "jev"
+    && body.strategy !== "clef") {
+    issues.push({ path: ["strategy"], message: 'strategy must be "failover", "round-robin", "random", "least-used", "reset-window", "jev", or "clef"' });
   }
   if (body.stickyLimit !== undefined
     && (typeof body.stickyLimit !== "number" || !Number.isInteger(body.stickyLimit)

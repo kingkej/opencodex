@@ -7,7 +7,7 @@ export interface ResolveJevComboDecisionOptions extends ResolveJevDecisionOption
 }
 
 export async function resolveJevComboDecision(options: ResolveJevComboDecisionOptions): Promise<JevDecision> {
-  if (!options.decisionModel?.trim()) return resolveJevDecision(options);
+  if (options.service === "clef" || !options.decisionModel?.trim()) return resolveJevDecision(options);
   if (!options.invokeModel) {
     const now = options.now ?? Date.now;
     const startedAt = now();

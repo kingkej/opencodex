@@ -447,7 +447,7 @@ export async function executeComboResponses(
   const payloadEligible = (target: (typeof combo.targets)[number]): boolean =>
     comboPayloadReadable || !unreadableEncryptedAgentTask || canDecryptUnreadableAgentTask(target);
   const targetEligible = (target: (typeof combo.targets)[number]): boolean =>
-    (combo.strategy !== "jev" || target.provider !== JEV_PROVIDER_ID)
+    ((combo.strategy !== "jev" && combo.strategy !== "clef") || target.provider !== JEV_PROVIDER_ID)
     && payloadEligible(target)
     && reasoningReplayEligible(target)
     && (protocolLanes?.pickable(target) ?? true);
@@ -559,7 +559,7 @@ export async function executeComboResponses(
       : comboUnavailable(comboId);
   }
   let jevDecision: JevDecision | undefined;
-  if (combo.strategy === "jev") {
+  if (combo.strategy === "jev" || combo.strategy === "clef") {
     const choices = eligibleJevComboChoices(config, comboId, targetEligible, Date.now());
     const first = choices[0];
     if (!first) return comboUnavailable(comboId);
@@ -577,6 +577,7 @@ export async function executeComboResponses(
     let decision: JevDecision;
     try {
       decision = await resolveJevComboDecision({
+        service: combo.strategy,
         body,
         candidates: choices.map(choice => choice.candidate),
         fallback,
@@ -602,7 +603,7 @@ export async function executeComboResponses(
     } catch (error) {
       if (options.abortSignal?.aborted) return clientCancelledResponse();
       decision = {
-        backend: jevDecisionBackendFor(combo),
+        backend: combo.strategy === "clef" ? "systemone" : jevDecisionBackendFor(combo),
         ...fallback,
         gate: "network",
         latencyMs: Math.max(0, Date.now() - decisionStartedAt),
@@ -613,6 +614,7 @@ export async function executeComboResponses(
     pick = { ...selected.pick, attempted: [targetKey(selected.pick.target)] };
     logCtx.jevDecision = normalizePersistedJevDecision({
       version: 1,
+      ...(combo.strategy === "clef" ? { service: "clef" } : {}),
       comboId,
       selected: {
         provider: selected.pick.target.provider,
@@ -628,7 +630,7 @@ export async function executeComboResponses(
         : {}),
       ...(decision.usage ? { usage: decision.usage } : {}),
     });
-    console.debug("[combo] JEV decision", {
+    console.debug(`[combo] ${combo.strategy === "clef" ? "Clef" : "JEV"} decision`, {
       backend: decision.backend,
       targetKey: decision.targetKey,
       effort: decision.effort,
@@ -851,10 +853,10 @@ export async function executeComboResponses(
     let response: Response;
     try {
       const currentTargetProvider = pick.target.provider;
-      const remainingTargets = combo.strategy === "jev"
+      const remainingTargets = (combo.strategy === "jev" || combo.strategy === "clef")
         ? combo.targets.filter(target => !pick!.attempted.includes(targetKey(target)))
         : combo.targets.slice(pick.targetIndex + 1);
-      const deferCodexResetDerivedCooldown = (combo.strategy === "failover" || combo.strategy === "jev")
+      const deferCodexResetDerivedCooldown = (combo.strategy === "failover" || (combo.strategy === "jev" || combo.strategy === "clef"))
         && remainingTargets.some(target =>
           target.provider === currentTargetProvider
           && targetEligible(target)

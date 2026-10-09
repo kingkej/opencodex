@@ -288,3 +288,9 @@ opencodex 인스턴스에 기록했는지 확인하세요.
 일반적인 400 오류는 종료되지만, `user`를 명시적으로 거부하거나 `reasoning.effort`/`reasoning_effort`의 지원되지 않는 값 또는 모델별 이미지 입력 거부(`param: input`)를 나타내는 구조화된 오류는 출력 시작 전에 다음 적격 대상으로 넘어갈 수 있습니다. 이 경우 쿨다운을 기록하지 않습니다. 보안 정책 거부, 취소 및 이미 시작된 출력은 재실행하지 않습니다.
 
 [Canonical compatibility details](/guides/combos/#request-local-target-compatibility).
+
+## Cloudflare Clef
+
+`clef` 전략은 OpenRouter를 통한 Cloudflare Clef로 대상과 추론 수준을 선택합니다. OpenRouter 키를 설정하고 `strategy: "clef"`와 별칭 `clef-auto`를 가진 별도 Combo를 만드세요. 선택된 모델이 작업을 수행합니다. 결정 실패 시 첫 번째 사용 가능한 대상을 사용하고 실행 실패는 일반 폴백으로 처리합니다. Stats는 해당 Combo의 결정을 표시합니다. OpenRouter에는 제한된 문맥과 모델 메모가 전달됩니다.
+
+[Clef API](/guides/combos/#clef-decision-guided-first-pick).

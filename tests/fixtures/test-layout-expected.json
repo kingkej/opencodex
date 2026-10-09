@@ -1,4 +1,7 @@
 {
+  "cli-clef-combo.test.ts": "cli",
+  "clef-decision.test.ts": "routing",
+  "server-clef-combo-e2e.test.ts": "server",
   "anthropic-instance-isolation.test.ts": "adapters/anthropic", "anthropic-instance-pool-parity.test.ts": "adapters/anthropic",
   "anthropic-instance-quota.test.ts": "adapters/anthropic", "anthropic-instance-recovery.test.ts": "adapters/anthropic",
   "anthropic2-fast-parity.test.ts": "adapters/anthropic", "anthropic2-native-routing.test.ts": "claude-integration",

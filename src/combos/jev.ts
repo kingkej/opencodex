@@ -9,6 +9,8 @@ import {
   resolveProviderApiKey,
 } from "../providers/api-key-resolve";
 import { providerMatchesRegistryTransport } from "../providers/registry";
+import { clefDecisionEndpoint, CLEF_API_URL } from "./clef";
+export { CLEF_API_URL, CLEF_MODEL } from "./clef";
 import type { OcxComboDefaultEffort, OcxConfig, OcxProviderConfig } from "../types";
 import { jevDecisionEndpointUrl } from "./jev-decision-contract";
 import {
@@ -120,6 +122,8 @@ export interface JevDecision {
 }
 
 export interface ResolveJevDecisionOptions {
+  /** Clef shares the bounded System One choice contract, through OpenRouter Decisions. */
+  service?: "jev" | "clef";
   body: unknown;
   candidates: readonly JevCandidate[];
   fallback: { targetKey: string; effort: OcxComboDefaultEffort | null };
@@ -642,7 +646,7 @@ function canonicalJevProvider(config: OcxConfig): OcxProviderConfig {
   };
 }
 
-interface JevDecisionEndpoint {
+export interface JevDecisionEndpoint {
   name: string;
   provider: OcxProviderConfig;
   url: string;
@@ -737,7 +741,8 @@ function jevDecisionEndpoint(
 export async function resolveJevDecision(options: ResolveJevDecisionOptions): Promise<JevDecision> {
   const now = options.now ?? Date.now;
   const startedAt = now();
-  const backend = jevDecisionBackendFor({ decisionProvider: options.decisionProvider });
+  const isClef = options.service === "clef";
+  const backend = isClef ? "systemone" : jevDecisionBackendFor({ decisionProvider: options.decisionProvider });
   const failed = (gate: Exclude<JevDecision["gate"], "apply">): JevDecision =>
     fallbackDecision(options.fallback, gate, Math.max(0, now() - startedAt), backend);
 
@@ -745,7 +750,9 @@ export async function resolveJevDecision(options: ResolveJevDecisionOptions): Pr
   if (options.candidates.length === 0) return failed("no_choices");
   if (!candidatesFitRequestBounds(options.candidates)) return failed("invalid");
 
-  const endpoint = jevDecisionEndpoint(options.config, options.decisionProvider ?? JEV_PROVIDER_ID, options.isDestinationAllowed);
+  const endpoint = isClef
+    ? clefDecisionEndpoint(options.config, options.isDestinationAllowed)
+    : jevDecisionEndpoint(options.config, options.decisionProvider ?? JEV_PROVIDER_ID, options.isDestinationAllowed);
   if (endpoint === null) return failed("invalid");
   if (!endpoint) return failed("missing_key");
 
@@ -770,7 +777,7 @@ export async function resolveJevDecision(options: ResolveJevDecisionOptions): Pr
     return failed("invalid");
   }
 
-  const timeoutMs = jevDecisionTimeoutMs(options.timeoutMs);
+  const timeoutMs = jevDecisionTimeoutMs(isClef ? undefined : options.timeoutMs);
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = options.signal
     ? AbortSignal.any([options.signal, timeoutSignal])
@@ -790,7 +797,7 @@ export async function resolveJevDecision(options: ResolveJevDecisionOptions): Pr
         body: requestBody,
         signal,
       },
-      JEV_OUTBOUND_DEPENDENCIES,
+      isClef ? { isCanonicalUrl: (name, url) => name === "openrouter" && url === CLEF_API_URL } : JEV_OUTBOUND_DEPENDENCIES,
     );
     if (options.signal?.aborted) throw options.signal.reason;
 

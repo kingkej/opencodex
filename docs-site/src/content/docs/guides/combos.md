@@ -207,6 +207,53 @@ order. Weights and `stickyLimit` do not affect this strategy.
 
 This ranking and provider exclusion before dispatch require fresh model-inference limits that apply to the current single API key as a whole. OAuth/current-account summaries, caller-forward routes, multiple keys, and snapshots with changed credentials or destinations are display-only for this early decision. The same applies when `Authorization`, `x-api-key`, or `x-goog-api-key` headers override credentials; search-only and MCP-only windows are excluded. If no eligible target has an applicable reset, configuration order wins. Account selection and retries still enforce their normal limits.
 
+### Clef: decision-guided first pick
+
+The `clef` strategy asks [Cloudflare Clef through OpenRouter](https://openrouter.ai/cloudflare/clef)
+to choose one currently eligible target and reasoning effort. The selected execution model performs
+the task. Clef is a decision service rather than an ordinary chat target.
+
+Configure the canonical OpenRouter provider with a key using **Providers → OpenRouter**. The
+explicit `OPENROUTER_API_KEY` environment fallback also works. Create a separate virtual model:
+
+```json
+{
+  "combos": {
+    "clef-auto": {
+      "alias": "clef-auto",
+      "displayName": "Clef Auto",
+      "strategy": "clef",
+      "reasoningEffortMode": "adaptive",
+      "targets": [
+        { "provider": "openai", "model": "gpt-6.1-sol" },
+        { "provider": "openai", "model": "gpt-6-astra" },
+        { "provider": "openai", "model": "gpt-6-luna" }
+      ]
+    }
+  }
+}
+```
+
+Use targets already available in your installation. The CLI also accepts:
+
+```bash
+ocx combo set clef-auto --targets openai/gpt-6.1-sol,openai/gpt-6-luna --strategy clef --alias clef-auto
+```
+
+In **Models → Combos**, select **Clef** and edit each target's allowed reasoning efforts and
+optional capability notes. Each decision goes to `https://openrouter.ai/api/alpha/decisions` with
+model `cloudflare/clef`. OpenRouter receives a bounded sample of the task, recent assistant intent,
+latest tool output, boolean signals and configured model notes. It does not receive the full
+request, tool arguments, raw images, encrypted reasoning or execution-provider credentials. Keep
+secrets out of model notes. Clef currently reads roughly the first 2K tokens of text state on
+Workers AI; actual image input is handled by the selected execution model.
+
+An unavailable or invalid decision falls back to the first eligible target at medium effort, or
+an allowed lower effort. Retryable execution failures continue through ordinary Combo fallback
+without another Clef request. The **Stats** tab shows Clef choices, latency and decision tokens
+separately from execution-model usage, filtered to this Combo. Historical storage retains the
+`jevDecision` field for compatibility and marks Clef records with `service: "clef"`.
+
 ### Decision method
 
 `strategy: "jev"` asks a decision backend to choose the first eligible target and a compatible
@@ -815,7 +862,7 @@ Combos are stored in the top-level `combos` object, keyed by combo id:
 | `targets` | Yes | — | Non-empty ordered array of configured `{ provider, model, weight?, lastResort? }` targets. Duplicate provider/model pairs are rejected. |
 | `targets[].weight` | No | `1` | Integer from 1 to 10,000. Used by round-robin and random; ignored by failover, least-used, reset-window, and JEV. |
 | `targets[].lastResort` | No | `false` | Marks an emergency-only target. Inert unless `cooldownWaitPolicy` is set. Never makes a target permanently ineligible: when no normal target can be reached it is dispatched as usual. |
-| `strategy` | No | `"failover"` | `"failover"`, `"round-robin"`, `"random"`, `"least-used"`, `"reset-window"`, or `"jev"`. JEV decides only the initial eligible target and effort; ordinary Combo fallback owns later attempts. |
+| `strategy` | No | `"failover"` | `"failover"`, `"round-robin"`, `"random"`, `"least-used"`, `"reset-window"`, `"jev"`, or `"clef"`. JEV/Clef decide only the initial eligible target and effort; ordinary Combo fallback owns later attempts. |
 | `stickyLimit` | No | `1` | Integer from 1 to 100 successful requests per round-robin selection. Applies only to round-robin. |
 | `cooldownMs` | No | unset → upstream fallback (5 s for request-rate 429 codes `1302`/`1305`, 10 min for a spent usage window or a credential/billing failure, otherwise 60 s) | Integer from 1 to 600000. When set, applies as the per-target cooldown whenever no usable upstream `Retry-After` or Codex reset signal exists, including request-rate 429s; when unset, uses the upstream fallback. |
 | `waitForCooldownMs` | No | `0` | Integer from 0 to 600000. Maximum time to wait for the earliest eligible cooling target before returning `combo_unavailable`; abort cancels the wait. |

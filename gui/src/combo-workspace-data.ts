@@ -19,7 +19,7 @@ import {
 
 export { SUPPORTED_NATIVE_OPENAI_SLUGS };
 
-export type ComboStrategy = "failover" | "round-robin" | "random" | "least-used" | "reset-window" | "jev";
+export type ComboStrategy = "failover" | "round-robin" | "random" | "least-used" | "reset-window" | "jev" | "clef";
 export type ComboEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export const COMBO_EFFORTS: ComboEffort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
@@ -31,6 +31,7 @@ export const COMBO_STRATEGIES: readonly ComboStrategy[] = [
   "least-used",
   "reset-window",
   "jev",
+  "clef",
 ] as const;
 
 export const COMBO_STRATEGY_LABEL_KEYS: Record<ComboStrategy, TKey> = {
@@ -40,6 +41,7 @@ export const COMBO_STRATEGY_LABEL_KEYS: Record<ComboStrategy, TKey> = {
   "least-used": "cws.strategy.leastUsed",
   "reset-window": "cws.strategy.resetWindow",
   jev: "cws.strategy.jev",
+  clef: "cws.strategy.clef",
 };
 
 export const COMBO_STRATEGY_HINT_KEYS: Record<ComboStrategy, TKey> = {
@@ -49,6 +51,7 @@ export const COMBO_STRATEGY_HINT_KEYS: Record<ComboStrategy, TKey> = {
   "least-used": "cws.strategy.leastUsedHint",
   "reset-window": "cws.strategy.resetWindowHint",
   jev: "cws.strategy.jevHint",
+  clef: "cws.strategy.clefHint",
 };
 
 export const COMBO_TARGETS_HINT_KEYS: Record<ComboStrategy, TKey> = {
@@ -58,6 +61,7 @@ export const COMBO_TARGETS_HINT_KEYS: Record<ComboStrategy, TKey> = {
   "least-used": "cws.targets.leastUsedHint",
   "reset-window": "cws.targets.resetWindowHint",
   jev: "cws.targets.jevHint",
+  clef: "cws.targets.jevHint",
 };
 
 const COMBO_STRATEGY_SET = new Set<string>(COMBO_STRATEGIES);

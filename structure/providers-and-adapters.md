@@ -340,7 +340,7 @@ and the upstream URL through `handleResponses`.
 
 ## TypeSafe JEV decision provider
 
-The JEV Combo decision contract (TypeSafe, compatible HTTPS services with any endpoint path, local System One rows, and opencodex-model
+The JEV/Clef Combo decision contract (OpenRouter Clef, TypeSafe, compatible HTTPS services with any endpoint path, local System One rows, and opencodex-model
 decision backends) lives in [JEV Decision Routing](providers/jev-decision.md).
 
 ## Preset notes

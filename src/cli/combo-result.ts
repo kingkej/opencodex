@@ -2,7 +2,7 @@ import { parseComboTargets } from "./combo-input";
 import { printCatalogResult } from "./catalog-command-result";
 
 const ENUMS: Readonly<Record<string, readonly (string | null)[]>> = {
-  strategy: ["failover", "round-robin", "random", "least-used", "reset-window", "jev"],
+  strategy: ["failover", "round-robin", "random", "least-used", "reset-window", "jev", "clef"],
   defaultEffort: [null, "low", "medium", "high", "xhigh", "max", "ultra"],
   defaultEffortMode: ["fallback", "force"], reasoningEffortMode: ["strict", "adaptive"],
   imageInput: ["auto", "disabled"], cooldownWaitPolicy: ["before-last-resort"],

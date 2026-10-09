@@ -1246,7 +1246,7 @@ export interface OcxConfig {
   corsAllowOrigins?: string[];
 }
 
-export type OcxComboStrategy = "failover" | "round-robin" | "random" | "least-used" | "reset-window" | "jev";
+export type OcxComboStrategy = "failover" | "round-robin" | "random" | "least-used" | "reset-window" | "jev" | "clef";
 export type OcxComboDefaultEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type OcxComboDefaultEffortMode = "fallback" | "force";
 
@@ -1272,12 +1272,12 @@ export interface OcxComboTarget {
   /** Relative target weight for round-robin batches and random selection. Default 1; valid range 1..10000. */
   weight?: number;
   /**
-   * Exact efforts JEV may choose for this target. Omit to allow every effort the
+   * Exact efforts the decision service may choose for this target. Omit to allow every effort the
    * target currently advertises; an explicit list must be non-empty.
    */
   reasoningEfforts?: OcxComboDefaultEffort[];
   /**
-   * Operator-authored capability description sent only to the JEV decision
+   * Operator-authored capability description sent only to the configured decision
    * service for this target. The built-in model profile always applies.
    */
   modelProfile?: string;

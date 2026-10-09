@@ -302,3 +302,9 @@ combo id 不存在。响应是 HTTP 404，类型为 `invalid_request_error`。�
 一般 400 错误仍会终止请求，但明确拒绝 `user`、对 `reasoning.effort`/`reasoning_effort` 返回不支持值，或返回模型特定图像输入拒绝（`param: input`）的结构化错误，可让 combo 在输出开始前尝试下一个符合条件的目标，而不记录冷却时间。安全策略拒绝、取消以及已经开始的输出仍不可重放。
 
 [Canonical compatibility details](/guides/combos/#request-local-target-compatibility).
+
+## Cloudflare Clef
+
+`clef` 策略通过 OpenRouter 使用 Cloudflare Clef 选择目标和推理强度。配置 OpenRouter 密钥，然后创建具有 `strategy: "clef"` 和别名 `clef-auto` 的独立 Combo。所选模型执行任务。决策失败时使用第一个可用目标；执行失败按普通回退逻辑处理。Stats 显示此 Combo 的决策。OpenRouter 会收到有限的上下文样本和模型备注。
+
+[Clef API](/guides/combos/#clef-decision-guided-first-pick).
